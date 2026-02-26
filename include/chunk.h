@@ -43,8 +43,10 @@ typedef enum {
     /* Type casting */
     OP_CAST,        /* operand: 0=int, 1=float, 2=string, 3=bool */
 
-    /* Error */
+    /* Error / Exception handling */
     OP_THROW,
+    OP_TRY_BEGIN,   /* operand: uint16 offset to catch block */
+    OP_TRY_END,     /* pop exception handler, jump past catch */
 
     OP_HALT,
 } OpCode;

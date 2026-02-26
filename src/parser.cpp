@@ -407,6 +407,33 @@ static ASTNode* statement(Parser* p) {
     if (match(p, TOKEN_IF))     return if_statement(p);
     if (match(p, TOKEN_WHILE))  return while_statement(p);
     if (match(p, TOKEN_FOR))    return for_statement(p);
+
+    /* try { ... } catch (e) { ... } */
+    if (match(p, TOKEN_TRY)) {
+        int line = previous(p)->line;
+        consume(p, TOKEN_LEFT_BRACE, "Expected '{' after 'try'.");
+        ASTNode* try_body = block(p);
+
+        consume(p, TOKEN_CATCH, "Expected 'catch' after try block.");
+
+        /* Optional error variable: catch (e) or catch */
+        char* err_var = nullptr;
+        if (match(p, TOKEN_LEFT_PAREN)) {
+            Token* name = advance_tok(p);
+            err_var = copy_lexeme(name);
+            consume(p, TOKEN_RIGHT_PAREN, "Expected ')' after catch variable.");
+        }
+
+        consume(p, TOKEN_LEFT_BRACE, "Expected '{' after 'catch'.");
+        ASTNode* catch_body = block(p);
+
+        ASTNode* n = ast_new(NODE_TRY_CATCH, line);
+        n->as.try_catch.try_body = try_body;
+        n->as.try_catch.catch_body = catch_body;
+        n->as.try_catch.err_var = err_var;
+        return n;
+    }
+
     if (match(p, TOKEN_RETURN)) {
         ASTNode* n = ast_new(NODE_RETURN, previous(p)->line);
         n->as.child = check(p, TOKEN_SEMICOLON) ? nullptr : expression(p);

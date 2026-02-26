@@ -69,6 +69,7 @@ static TokenType identifier_type(Lexer* l) {
         if (len == 3 && memcmp(l->start, "and", 3) == 0) return TOKEN_AND;
         break;
     case 'b': return check_keyword(l, 1, 3, "ool", TOKEN_TYPE_BOOL);
+    case 'c': return check_keyword(l, 1, 4, "atch", TOKEN_CATCH);
     case 'e': return check_keyword(l, 1, 3, "lse", TOKEN_ELSE);
     case 'f':
         if (len > 1) {
@@ -97,7 +98,9 @@ static TokenType identifier_type(Lexer* l) {
             switch (l->start[1]) {
             case 'a': return check_keyword(l, 2, 5, "ntrum", TOKEN_TANTRUM);
             case 'h': return check_keyword(l, 2, 3, "row", TOKEN_THROW);
-            case 'r': return check_keyword(l, 2, 2, "ue", TOKEN_TRUE);
+            case 'r': if (len == 4) return check_keyword(l, 2, 2, "ue", TOKEN_TRUE);
+                      if (len == 3) return check_keyword(l, 2, 1, "y", TOKEN_TRY);
+                      break;
             }
         } break;
     case 'u': return check_keyword(l, 1, 2, "se", TOKEN_USE);

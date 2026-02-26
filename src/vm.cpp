@@ -12,6 +12,7 @@
 void vm_init(VM* vm) {
     vm->stack_top = vm->stack;
     vm->frame_count = 0;
+    vm->handler_count = 0;
     vm->objects = nullptr;
     table_init(&vm->globals);
     builtins_register(vm);
@@ -426,10 +427,40 @@ static InterpretResult run(VM* vm) {
 
         case OP_THROW: {
             Value v = vm_pop(vm);
-            fprintf(stderr, "\n[Tantrums Error] ");
-            value_print(v);
-            fprintf(stderr, "\n");
-            return INTERPRET_RUNTIME_ERROR;
+            /* Check if there's an exception handler */
+            if (vm->handler_count > 0) {
+                ExceptionHandler* h = &vm->handlers[--vm->handler_count];
+                /* Unwind stack and frames */
+                vm->stack_top = h->stack_top;
+                vm->frame_count = h->frame_count;
+                frame = &vm->frames[vm->frame_count - 1];
+                frame->ip = h->catch_ip;
+                /* Push the error value for catch block */
+                vm_push(vm, v);
+            } else {
+                /* No handler — fatal error */
+                fprintf(stderr, "\n[Tantrums Error] ");
+                value_print(v);
+                fprintf(stderr, "\n");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+        } break;
+
+        case OP_TRY_BEGIN: {
+            uint16_t offset = READ_SHORT();
+            if (vm->handler_count >= MAX_EXCEPTION_HANDLERS) {
+                vm_runtime_error(vm, "Too many nested try blocks.");
+                return INTERPRET_RUNTIME_ERROR;
+            }
+            ExceptionHandler* h = &vm->handlers[vm->handler_count++];
+            h->catch_ip = frame->ip + offset;  /* jump target for catch */
+            h->frame_count = vm->frame_count;
+            h->stack_top = vm->stack_top;
+        } break;
+
+        case OP_TRY_END: {
+            /* Try block completed normally — pop handler */
+            if (vm->handler_count > 0) vm->handler_count--;
         } break;
 
         case OP_HALT: return INTERPRET_OK;
@@ -586,7 +617,7 @@ InterpretResult vm_interpret(VM* vm, const char* source) {
     }
 
     /* Compile */
-    ObjFunction* script = compiler_compile(ast);
+    ObjFunction* script = compiler_compile(ast, MODE_BOTH);
     ast_free(ast);
     if (!script) return INTERPRET_COMPILE_ERROR;
 

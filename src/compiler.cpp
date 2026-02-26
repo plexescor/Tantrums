@@ -20,6 +20,7 @@ typedef struct CompilerState {
 
 static CompilerState* current = nullptr;
 static bool had_type_error = false;
+static CompileMode compile_mode = MODE_BOTH;
 
 /* ── Function signature table (for type checking calls) ── */
 typedef struct {
@@ -63,6 +64,12 @@ static void prescan_signatures(ASTNode* program) {
     for (int i = 0; i < program->as.program.count; i++) {
         ASTNode* n = program->as.program.nodes[i];
         if (n->type == NODE_FUNC_DECL) {
+            /* Check for duplicate function names */
+            if (find_func_sig(n->as.func_decl.name)) {
+                fprintf(stderr, "[Line %d] Error: Duplicate function '%s'.\n",
+                        n->line, n->as.func_decl.name);
+                had_type_error = true;
+            }
             register_func_sig(n->as.func_decl.name, n->as.func_decl.ret_type, n);
         }
     }
@@ -140,6 +147,7 @@ static void type_error(int line, const char* msg) {
 
 /* Check function call argument types */
 static void check_call_types(ASTNode* call_node) {
+    if (compile_mode == MODE_DYNAMIC) return; /* skip in dynamic mode */
     if (call_node->as.call.callee->type != NODE_IDENTIFIER) return;
     const char* fn_name = call_node->as.call.callee->as.identifier.name;
     FuncSig* sig = find_func_sig(fn_name);
@@ -296,7 +304,17 @@ static void compile_expr(ASTNode* node) {
         case TOKEN_PLUS:          emit_byte(node->line, OP_ADD); break;
         case TOKEN_MINUS:         emit_byte(node->line, OP_SUB); break;
         case TOKEN_STAR:          emit_byte(node->line, OP_MUL); break;
-        case TOKEN_SLASH:         emit_byte(node->line, OP_DIV); break;
+        case TOKEN_SLASH:
+            /* Compile-time division by zero check */
+            if (node->as.binary.right->type == NODE_INT_LIT &&
+                node->as.binary.right->as.int_literal == 0) {
+                type_error(node->line, "Division by zero.");
+            }
+            if (node->as.binary.right->type == NODE_FLOAT_LIT &&
+                node->as.binary.right->as.float_literal == 0.0) {
+                type_error(node->line, "Division by zero.");
+            }
+            emit_byte(node->line, OP_DIV); break;
         case TOKEN_PERCENT:       emit_byte(node->line, OP_MOD); break;
         case TOKEN_EQUAL_EQUAL:   emit_byte(node->line, OP_EQ); break;
         case TOKEN_BANG_EQUAL:    emit_byte(node->line, OP_NEQ); break;
@@ -356,8 +374,8 @@ static void compile_node(ASTNode* node) {
         break;
 
     case NODE_VAR_DECL: {
-        /* Type check: if typed and init has inferable type, verify */
-        if (node->as.var_decl.type_name && node->as.var_decl.init) {
+        /* Type check: if typed and init has inferable type, verify (skip in DYNAMIC mode) */
+        if (compile_mode != MODE_DYNAMIC && node->as.var_decl.type_name && node->as.var_decl.init) {
             const char* init_type = infer_expr_type(node->as.var_decl.init);
             if (init_type && !types_compatible(node->as.var_decl.type_name, init_type)) {
                 char buf[512];
@@ -394,16 +412,30 @@ static void compile_node(ASTNode* node) {
     } break;
 
     case NODE_ASSIGN: {
-        /* Type check assignment to typed local */
-        int check_slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
-        if (check_slot != -1 && current->locals[check_slot].type_name[0]) {
-            const char* val_type = infer_expr_type(node->as.assign.value);
-            if (val_type && !types_compatible(current->locals[check_slot].type_name, val_type)) {
+        /* STATIC mode: error if assigning to undeclared (untyped) variable */
+        if (compile_mode == MODE_STATIC) {
+            int s = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
+            if (s == -1) {
                 char buf[512];
                 snprintf(buf, sizeof(buf),
-                         "Cannot assign '%s' value to '%s' variable '%s'.",
-                         val_type, current->locals[check_slot].type_name, node->as.assign.name);
+                         "Static mode: variable '%s' must be declared with a type (e.g., int %s = ...).",
+                         node->as.assign.name, node->as.assign.name);
                 type_error(node->line, buf);
+            }
+        }
+
+        /* Type check assignment to typed local (skip in DYNAMIC mode) */
+        if (compile_mode != MODE_DYNAMIC) {
+            int check_slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
+            if (check_slot != -1 && current->locals[check_slot].type_name[0]) {
+                const char* val_type = infer_expr_type(node->as.assign.value);
+                if (val_type && !types_compatible(current->locals[check_slot].type_name, val_type)) {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf),
+                             "Cannot assign '%s' value to '%s' variable '%s'.",
+                             val_type, current->locals[check_slot].type_name, node->as.assign.name);
+                    type_error(node->line, buf);
+                }
             }
         }
         compile_expr(node->as.assign.value);
@@ -568,6 +600,59 @@ static void compile_node(ASTNode* node) {
             compile_node(node->as.program.nodes[i]);
         break;
 
+    case NODE_TRY_CATCH: {
+        /*  Layout:
+         *    OP_TRY_BEGIN <catch_offset>     ← push handler
+         *    [try body]
+         *    OP_TRY_END                      ← pop handler
+         *    OP_JUMP <end_offset>            ← skip catch block
+         *    [catch: error val on stack]
+         *    [if err_var: SET_LOCAL, else POP]
+         *    [catch body]
+         *    [end]
+         */
+        begin_scope();
+
+        /* OP_TRY_BEGIN — will patch with catch offset */
+        int try_begin = current->function->chunk->count;
+        emit_byte(node->line, OP_TRY_BEGIN);
+        emit_byte(node->line, 0xFF); /* placeholder high */
+        emit_byte(node->line, 0xFF); /* placeholder low */
+
+        /* Compile try body */
+        compile_node(node->as.try_catch.try_body);
+
+        /* OP_TRY_END — pop exception handler */
+        emit_byte(node->line, OP_TRY_END);
+
+        /* Jump past the catch block */
+        int skip_catch = emit_jump(node->line, OP_JUMP);
+
+        /* Patch the catch offset: from after OP_TRY_BEGIN to here */
+        int catch_start = current->function->chunk->count;
+        int offset = catch_start - (try_begin + 3); /* +3 for opcode + 2 operand bytes */
+        current->function->chunk->code[try_begin + 1] = (offset >> 8) & 0xFF;
+        current->function->chunk->code[try_begin + 2] = offset & 0xFF;
+
+        /* Handle the error value (pushed on stack by OP_THROW) */
+        if (node->as.try_catch.err_var) {
+            /* Declare error variable as local */
+            add_local(node->as.try_catch.err_var,
+                      (int)strlen(node->as.try_catch.err_var), "string");
+        } else {
+            /* No error variable — discard the error value */
+            emit_byte(node->line, OP_POP);
+        }
+
+        /* Compile catch body */
+        compile_node(node->as.try_catch.catch_body);
+
+        end_scope(node->line);
+
+        /* Patch the skip-catch jump */
+        patch_jump(skip_catch);
+    } break;
+
     case NODE_USE:
         /* Already resolved before compilation — skip */
         break;
@@ -579,8 +664,9 @@ static void compile_node(ASTNode* node) {
     }
 }
 
-ObjFunction* compiler_compile(ASTNode* program) {
+ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
     had_type_error = false;
+    compile_mode = mode;
 
     /* Pre-scan to collect function signatures for type checking */
     prescan_signatures(program);

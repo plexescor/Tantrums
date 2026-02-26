@@ -8,6 +8,9 @@
     ],
     "patterns": [
         {
+            "include": "#mode-directive"
+        },
+        {
             "include": "#comments"
         },
         {
@@ -48,6 +51,22 @@
         }
     ],
     "repository": {
+        "mode-directive": {
+            "patterns": [
+                {
+                    "comment": "Mode directive: #mode static/dynamic/both",
+                    "match": "(#mode)\\s+(static|dynamic|both)",
+                    "captures": {
+                        "1": {
+                            "name": "keyword.preprocessor.mode.tantrums"
+                        },
+                        "2": {
+                            "name": "constant.language.mode.tantrums"
+                        }
+                    }
+                }
+            ]
+        },
         "comments": {
             "patterns": [
                 {
@@ -156,7 +175,7 @@
             "patterns": [
                 {
                     "name": "keyword.control.tantrums",
-                    "match": "\\b(if|else|while|for|in|return|throw)\\b"
+                    "match": "\\b(if|else|while|for|in|return|throw|try|catch)\\b"
                 },
                 {
                     "name": "keyword.declaration.tantrums",

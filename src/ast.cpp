@@ -119,6 +119,11 @@ void ast_free(ASTNode* node) {
     case NODE_USE:
         free(node->as.use_file);
         break;
+    case NODE_TRY_CATCH:
+        ast_free(node->as.try_catch.try_body);
+        ast_free(node->as.try_catch.catch_body);
+        if (node->as.try_catch.err_var) free(node->as.try_catch.err_var);
+        break;
     case NODE_PROGRAM:
         for (int i = 0; i < node->as.program.count; i++)
             ast_free(node->as.program.nodes[i]);

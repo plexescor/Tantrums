@@ -63,10 +63,56 @@ The `.42ass` bytecode is portable — compile on Windows, run on Linux (as long 
 | Lists & Maps | ✅ | `[1, 2, 3]`, `{"key": "value"}`, indexing |
 | Imports | ✅ | `use helper.42AHH;` — same directory |
 | Type checking | ✅ | Compile-time errors for typed params/vars |
+| Mode directives | ✅ | `#mode static;` / `#mode dynamic;` / `#mode both;` |
 | Pointers | ✅ | `alloc`/`free`, `&`/`*` operators |
-| Error handling | ✅ | `throw "message"` |
+| Error handling | ✅ | `throw`, `try`/`catch` |
 | Bytecode | ✅ | Binary `.42ass` format, cross-platform |
 | VS Code extension | ✅ | Syntax highlighting, IntelliSense, hover docs, commands |
+
+---
+
+## ⚙️ Typing Modes
+
+Control how strict the compiler is about types:
+
+```c
+#mode static;    // ALL variables must have type annotations
+#mode dynamic;   // NO type checking (types ignored)
+#mode both;      // Default: typed vars checked, untyped are dynamic
+```
+
+**Static mode** — forces you to declare every variable with a type:
+```c
+#mode static;
+
+tantrum main()
+{
+    int x = 42;       // ✅ OK
+    x = 10;           // ✅ OK (already declared)
+    y = "hello";      // ❌ COMPILE ERROR: must use string y = "hello";
+}
+```
+
+**Dynamic mode** — types are purely decorative, no checking at all:
+```c
+#mode dynamic;
+
+tantrum main()
+{
+    int x = "hello";  // ✅ OK (no type checking)
+    x = 3.14;         // ✅ OK
+}
+```
+
+**Both mode** (default) — typed variables are checked, untyped are free:
+```c
+tantrum main()
+{
+    int x = 42;       // ✅ checked
+    x = "nope";       // ❌ ERROR: can't assign string to int
+    y = "anything";   // ✅ OK (untyped = dynamic)
+}
+```
 
 ---
 
@@ -236,7 +282,22 @@ free x;                // deallocate
 ### Error Handling
 
 ```c
-throw "Something went wrong!";   // halts with error message
+// Unhandled throw — halts the program
+throw "Something went wrong!";
+
+// Try/catch — catch and handle errors
+try
+{
+    throw "oops";
+}
+catch (e)
+{
+    print("Caught: " + e);   // "Caught: oops"
+}
+
+// Without error variable
+try { throw "fail"; }
+catch { print("Something failed"); }
 ```
 
 ---
@@ -248,7 +309,7 @@ The extension lives in `tantrums-vscode/` and provides:
 - **Syntax highlighting** — keywords, types, functions, operators, strings, comments, imports
 - **IntelliSense** — snippets, keyword/type/builtin completions, user-defined function discovery
 - **Hover docs** — hover any keyword, type, or builtin for signature + description
-- **Diagnostics** — missing semicolons, unclosed brackets, type errors, bad conditions
+- **Diagnostics** — 18+ checks: type errors, undefined vars/functions, dead code, division by zero, and more
 - **Commands** — Run, Compile, Execute from the command palette or right-click menu
 - **File icons** — custom icons for `.42AHH` and `.42ass` files
 
@@ -303,8 +364,6 @@ Things we'd like to add eventually (no promises, this is a vibe project):
 
 - [ ] Standard library modules (`use math;`, `use fs;`)
 - [ ] C/C++ FFI (`foreign "C" { ... }`)
-- [ ] `try`/`catch` error handling
-- [ ] Full strict typing mode (`STRICT;`)
 - [ ] Native compilation (`.42AHH` → `.exe`)
 - [ ] Debugger integration
 - [ ] Graphics via OpenGL/Vulkan modules

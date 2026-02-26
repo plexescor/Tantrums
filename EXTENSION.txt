@@ -29,7 +29,7 @@ FEATURES — IMPLEMENTED
   SYNTAX HIGHLIGHTING:
   --------------------
   [x] Keywords         tantrum, return, if, else, for, while, in, true, false,
-                       alloc, free, throw, and, or, use, foreign, STRICT
+                       alloc, free, throw, and, or, use, try, catch
   [x] Types            int, float, string, bool, list, map
   [x] Operators        + - * / % == != < > <= >= => =< && || ! & *
   [x] Compound ops     ++ -- += -= *= /= %=
@@ -41,6 +41,7 @@ FEATURES — IMPLEMENTED
   [x] Function decls   tantrum keyword + function name in distinct colors
   [x] Typed variables  type + var name highlighted separately
   [x] Import paths     use filename.42AHH shown as string
+  [x] #mode directive  #mode keyword + static/dynamic/both highlighted
 
   AUTOCOMPLETE / INTELLISENSE:
   ----------------------------
@@ -53,6 +54,8 @@ FEATURES — IMPLEMENTED
   [x] Snippet: typed variable declarations (int, float, string, bool, list, map)
   [x] Snippet: input variants (int/float/bool input)
   [x] Snippet: use import, throw, alloc, return, len, append, type, range
+  [x] Snippet: try/catch blocks (with/without error variable)
+  [x] Snippet: #mode directive (static/dynamic/both picker)
   [x] Autocomplete: all keywords and types
   [x] Autocomplete: user-defined functions (discovered from current file)
   [x] Autocomplete: variable names (discovered from current file)
@@ -60,14 +63,28 @@ FEATURES — IMPLEMENTED
 
   ERROR HIGHLIGHTING (DIAGNOSTICS):
   ----------------------------------
-  [x] Missing semicolons at end of statements (yellow warning)
+  [x] Missing semicolons at end of statements (warning)
   [x] Unclosed braces { }, brackets [ ], parentheses ( )
   [x] Mismatched brackets (e.g., ( closed with })
   [x] Unterminated string literals
+  [x] Invalid escape sequences (\q, \y flagged — valid: \n \t \\ \" \r \0)
   [x] Empty conditions in if() / while()
-  [x] Possible = instead of == in conditions
-  [x] Type mismatch errors on function calls (red error)
-      e.g., passing string to float param
+  [x] #mode directive validation (red error for invalid/incomplete #mode)
+  [x] Type mismatch on function calls (param type vs arg type)
+  [x] Function arity checking (wrong number of arguments)
+  [x] Type mismatch on variable assignment (int x = "hello")
+  [x] Type mismatch on re-assignment to typed variables
+  [x] Duplicate function definitions (same name)
+  [x] Duplicate variable declarations (same scope)
+  [x] Undefined function calls (not declared with tantrum)
+  [x] Undefined variable usage (basic scope analysis, warning)
+  [x] Return outside function
+  [x] Dead code after return (unreachable code, warning)
+  [x] Division by zero on literal divisors (x / 0)
+  [x] Missing return in non-void function (warning)
+  [x] Unused typed variables (declared but never used, warning)
+  [x] Shadowing built-in function names (warning)
+  [x] Empty block body (warning for if/while/for/try/catch)
 
   HOVER DOCUMENTATION:
   --------------------

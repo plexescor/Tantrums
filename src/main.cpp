@@ -40,7 +40,27 @@ static char* make_bytecode_path(const char* source_path) {
 }
 
 /* Compile .42AHH source to .42ass bytecode file */
-static ObjFunction* compile_source(const char* source) {
+static ObjFunction* compile_source(char* source) {
+    /* ── Pre-scan for #mode directive ── */
+    CompileMode mode = MODE_BOTH;
+    char* mode_line = strstr(source, "#mode ");
+    if (mode_line) {
+        if (strncmp(mode_line + 6, "static", 6) == 0) {
+            mode = MODE_STATIC;
+            printf("[Tantrums] Mode: static (all variables must have types)\n");
+        } else if (strncmp(mode_line + 6, "dynamic", 7) == 0) {
+            mode = MODE_DYNAMIC;
+            printf("[Tantrums] Mode: dynamic (no type checking)\n");
+        } else if (strncmp(mode_line + 6, "both", 4) == 0) {
+            mode = MODE_BOTH;
+            printf("[Tantrums] Mode: both (typed + dynamic)\n");
+        }
+        /* Strip the #mode line (preserve line numbers) */
+        char* end = strchr(mode_line, '\n');
+        if (!end) end = mode_line + strlen(mode_line);
+        memset(mode_line, ' ', end - mode_line);
+    }
+
     Lexer lexer;
     lexer_init(&lexer, source);
     TokenList tokens = lexer_scan_tokens(&lexer);
@@ -157,7 +177,7 @@ static ObjFunction* compile_source(const char* source) {
         for (int j = 0; j < import_count; j++) free(imported_files[j]);
     }
 
-    ObjFunction* script = compiler_compile(ast);
+    ObjFunction* script = compiler_compile(ast, mode);
     ast_free(ast);
     return script;
 }

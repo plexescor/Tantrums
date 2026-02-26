@@ -17,7 +17,7 @@ typedef enum {
     NODE_EXPR_STMT, NODE_VAR_DECL, NODE_BLOCK,
     NODE_IF, NODE_WHILE, NODE_FOR_IN,
     NODE_FUNC_DECL, NODE_RETURN, NODE_THROW, NODE_FREE,
-    NODE_USE,
+    NODE_USE, NODE_TRY_CATCH,
     NODE_PROGRAM,
 } NodeType;
 
@@ -52,6 +52,7 @@ struct ASTNode {
         struct { char* name; char* ret_type; ParamDef* params; int param_count; ASTNode* body; } func_decl;
         ASTNode* child;                                               /* RETURN, THROW, FREE, EXPR_STMT */
         char* use_file;                                                /* USE       */
+        struct { ASTNode* try_body; ASTNode* catch_body; char* err_var; } try_catch; /* TRY_CATCH */
         NodeList program;                                             /* PROGRAM   */
     } as;
 };

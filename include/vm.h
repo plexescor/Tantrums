@@ -11,6 +11,15 @@ typedef struct {
     Value*       slots;       /* first stack slot for this frame */
 } CallFrame;
 
+#define MAX_EXCEPTION_HANDLERS 64
+
+typedef struct {
+    uint8_t* catch_ip;      /* IP of the catch block */
+    int      frame_count;   /* frame count when try was entered */
+    Value*   stack_top;     /* stack top when try was entered */
+    int      err_slot;      /* local slot for error variable (-1 if none) */
+} ExceptionHandler;
+
 struct VM {
     CallFrame frames[MAX_FRAMES];
     int       frame_count;
@@ -18,6 +27,8 @@ struct VM {
     Value*    stack_top;
     Table     globals;
     Obj*      objects;        /* linked list of all heap objects */
+    ExceptionHandler handlers[MAX_EXCEPTION_HANDLERS];
+    int       handler_count;
 };
 
 typedef enum {

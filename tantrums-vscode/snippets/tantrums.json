@@ -195,5 +195,53 @@
         "prefix": "range",
         "body": "range(${1:n})",
         "description": "Generate a range [0, n)"
+    },
+    "Mode Static": {
+        "prefix": "#mode static",
+        "body": "#mode static;",
+        "description": "Set typing mode to static — all variables must have types"
+    },
+    "Mode Dynamic": {
+        "prefix": "#mode dynamic",
+        "body": "#mode dynamic;",
+        "description": "Set typing mode to dynamic — no type checking"
+    },
+    "Mode Both": {
+        "prefix": "#mode both",
+        "body": "#mode both;",
+        "description": "Set typing mode to both (default) — typed vars checked, untyped are dynamic"
+    },
+    "Mode Directive": {
+        "prefix": "#mode",
+        "body": "#mode ${1|static,dynamic,both|};",
+        "description": "Set compiler typing mode"
+    },
+    "Try-Catch": {
+        "prefix": "try",
+        "body": [
+            "try",
+            "{",
+            "    $1",
+            "}",
+            "catch (${2:e})",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "Try-catch error handling block"
+    },
+    "Try-Catch (no var)": {
+        "prefix": "trycatch",
+        "body": [
+            "try",
+            "{",
+            "    $1",
+            "}",
+            "catch",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "Try-catch block without error variable"
     }
 }
