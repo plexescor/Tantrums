@@ -156,8 +156,19 @@ static ASTNode* primary(Parser* p) {
     /* alloc type(value) */
     if (match(p, TOKEN_ALLOC)) {
         ASTNode* n = ast_new(NODE_ALLOC, previous(p)->line);
-        Token* t = consume(p, TOKEN_IDENTIFIER, "Expected type after 'alloc'.");
-        n->as.alloc_expr.type_name = copy_lexeme(t);
+        /* Accept both identifier and type keyword tokens */
+        Token* t = peek_tok(p);
+        if (t->type == TOKEN_IDENTIFIER ||
+            t->type == TOKEN_TYPE_INT || t->type == TOKEN_TYPE_FLOAT ||
+            t->type == TOKEN_TYPE_STRING || t->type == TOKEN_TYPE_BOOL ||
+            t->type == TOKEN_TYPE_LIST || t->type == TOKEN_TYPE_MAP) {
+            advance_tok(p);
+            n->as.alloc_expr.type_name = copy_lexeme(t);
+        } else {
+            fprintf(stderr, "[Line %d] Error: Expected type after 'alloc'.\n", t->line);
+            p->had_error = true;
+            n->as.alloc_expr.type_name = nullptr;
+        }
         consume(p, TOKEN_LEFT_PAREN, "Expected '(' after alloc type.");
         n->as.alloc_expr.init = expression(p);
         consume(p, TOKEN_RIGHT_PAREN, "Expected ')'.");

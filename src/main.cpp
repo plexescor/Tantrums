@@ -6,6 +6,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#ifdef _WIN32
+extern "C" __declspec(dllimport) int __stdcall SetConsoleOutputCP(unsigned int);
+#endif
 
 static char* read_file(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -201,6 +204,9 @@ static void print_usage() {
 }
 
 int main(int argc, char* argv[]) {
+#ifdef _WIN32
+    SetConsoleOutputCP(65001);
+#endif
     if (argc < 2) { print_usage(); return 0; }
 
     const char* cmd = argv[1];

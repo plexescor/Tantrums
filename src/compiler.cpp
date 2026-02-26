@@ -441,10 +441,19 @@ static void compile_node(ASTNode* node) {
         compile_expr(node->as.assign.value);
         int slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
         if (slot != -1) {
+            /* Reassign existing local — set and pop the extra copy */
             emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
+            emit_byte(node->line, OP_POP);
+        } else if (current->scope_depth > 0) {
+            /* Inside a function: create a new local variable.
+               The value is already on the stack — just register the name.
+               No POP needed because the value IS the local's slot. */
+            add_local(node->as.assign.name, (int)strlen(node->as.assign.name));
         } else {
+            /* Top-level: create/update a global */
             ObjString* name = obj_string_new(node->as.assign.name, (int)strlen(node->as.assign.name));
             emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
+            emit_byte(node->line, OP_POP);
         }
     } break;
 
