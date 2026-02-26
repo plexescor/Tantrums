@@ -486,7 +486,8 @@ function checkDuplicateVariables(lines, diags) {
 function checkUndefinedFunctions(lines, funcSigs, diags) {
     var skip = {
         'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1,
-        'tantrum': 1, 'if': 1, 'while': 1, 'for': 1, 'catch': 1, 'alloc': 1, 'free': 1
+        'tantrum': 1, 'if': 1, 'while': 1, 'for': 1, 'catch': 1, 'alloc': 1, 'free': 1,
+        'int': 1, 'float': 1, 'string': 1, 'bool': 1, 'list': 1, 'map': 1
     };
     var callRe = /\b(\w+)\s*\(/g;
 
