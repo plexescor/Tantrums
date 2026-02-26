@@ -1,0 +1,320 @@
+================================================================================
+                     TANTRUMS LANGUAGE — QUICK REFERENCE
+================================================================================
+
+Version  : 0.1.0
+Extension: .42AHH  (source)  /  .42ass  (compiled bytecode)
+
+
+================================================================================
+HOW TO USE
+================================================================================
+
+  tantrums run <file.42AHH>       Compile to .42ass bytecode, then execute
+  tantrums compile <file.42AHH>   Compile to .42ass only (no execution)
+  tantrums exec <file.42ass>      Run a pre-compiled .42ass file
+
+The .42ass bytecode is cross-platform — compile on Windows, run on Linux/Mac
+(as long as the Tantrums VM binary is compiled for that OS).
+
+
+================================================================================
+WHAT'S IMPLEMENTED (v1)
+================================================================================
+
+  [x] Variables           int x = 5;  or  x = 5;
+  [x] Types               int, float, string, bool, list, map
+  [x] Functions           tantrum keyword, optional return type
+  [x] If / else if / else
+  [x] While loop
+  [x] For-in loop         for i in range(N), for i in list, for i in "string"
+  [x] Operators           + - * / % == != < > <= >= => =< && || and or !
+  [x] String escapes       \n \t \\ \" \r \0
+  [x] Auto string concat   "age: " + 25 -> "age: 25"
+  [x] Compound assignment   i += 1, i -= 2, i *= 3, i /= 4, i %= 5
+  [x] Increment/Decrement   i++, ++i, i--, --i
+  [x] Type checking         compile-time type errors for typed params/vars
+  [x] Comments            // single line,  /* multi-line */
+  [x] Lists               [1, 2, 3], indexing, append
+  [x] Imports             use helper.42AHH;  (same directory only)
+  [x] Maps                {"key": "value"}
+  [x] Strings             treated as list of characters
+  [x] Built-in functions  print, input, len, range, type, append
+  [x] Manual memory       alloc / free keywords
+  [x] Safe pointers       & and * operators, null-check on deref
+  [x] Throw               throw "error message";
+  [x] Bytecode compiler   .42AHH -> .42ass binary format
+  [x] Cross-platform VM   runs .42ass on any OS
+  [x] Entry point         main() function is called automatically
+
+
+================================================================================
+WHAT'S TBD (future versions)
+================================================================================
+
+  [ ] Modules             use math;  use fs;
+  [ ] C/C++ FFI           foreign "C" { ... }
+  [ ] Static typing       STRICT; mode
+  [ ] Try / catch          error handling blocks
+  [ ] Graphics            OpenGL / Vulkan via modules
+  [ ] Window creation     GLFW / SDL2 wrapper
+  [ ] Audio / Networking
+  [ ] Native compilation  .42AHH -> native .exe
+
+
+================================================================================
+SYNTAX REFERENCE
+================================================================================
+
+VARIABLES:
+----------
+  x = 42;                  // dynamic — no type needed
+  int x = 42;              // typed declaration
+  float pi = 3.14;
+  string name = "Tantrums";
+  bool alive = true;
+  list nums = [1, 2, 3];
+  map data = {"name": "john", "age": "21"};
+
+
+FUNCTIONS:
+----------
+  // With return type
+  tantrum int add(int a, int b)
+  {
+      return a + b;
+  }
+
+  // Without return type
+  tantrum greet(string name)
+  {
+      print("Hello " + name);
+  }
+
+  // Dynamic (no types at all)
+  tantrum multiply(a, b)
+  {
+      return a * b;
+  }
+
+
+IF / ELSE:
+----------
+  if (x > 10)
+  {
+      print("big");
+  }
+  else if (x == 10)
+  {
+      print("ten");
+  }
+  else
+  {
+      print("small");
+  }
+
+
+FOR LOOP:
+---------
+  for i in range(10)
+  {
+      print(i);
+  }
+
+  for ch in "Hello"
+  {
+      print(ch);
+  }
+
+  for item in [1, 2, 3]
+  {
+      print(item);
+  }
+
+
+WHILE LOOP:
+-----------
+  int count = 5;
+  while (count > 0)
+  {
+      print(count);
+      count = count - 1;
+  }
+
+
+OPERATORS:
+----------
+  +  -  *  /  %           Arithmetic  (+ also concatenates strings/lists)
+                          "hello " + 42 auto-converts to "hello 42"
+  ==  !=                  Equality
+  <  >  <=  >=            Comparison
+  =>  =<                  Reversed comparison (same as >= and <=)
+  &&  and                 Logical AND
+  ||  or                  Logical OR
+  !                       Logical NOT
+  &                       Address-of (pointer)
+  *                       Dereference (pointer)
+
+
+COMPOUND ASSIGNMENT:
+--------------------
+  i += 5;       // i = i + 5
+  i -= 3;       // i = i - 3
+  i *= 2;       // i = i * 2
+  i /= 4;       // i = i / 4
+  i %= 3;       // i = i % 3
+
+
+INCREMENT / DECREMENT:
+----------------------
+  i++;          // equivalent to i = i + 1;
+  ++i;          // equivalent to i = i + 1;
+  i--;          // equivalent to i = i - 1;
+  --i;          // equivalent to i = i - 1;
+
+
+IMPORTS (MODULES):
+------------------
+  Use the 'use' keyword to import functions from other .42AHH files.
+  Imported files must be in the SAME DIRECTORY as the main file.
+
+  use helper.42AHH;             // imports all functions from helper.42AHH
+  use math_utils.42AHH;         // imports all functions from math_utils.42AHH
+
+  // Then call imported functions directly:
+  print(helper_function(42));
+
+  Notes:
+  - Duplicate imports are ignored (import each file only once)
+  - Circular imports are prevented
+  - Imported functions/globals are available for type checking
+  - If the file is not found, compilation fails with an error
+
+
+TYPE CHECKING:
+--------------
+  When you declare types, the compiler enforces them at compile-time.
+  It will refuse to compile if types don't match:
+
+  tantrum int add(float a, float b)     // typed params
+  {
+      return a + b;
+  }
+
+  print(add("hello", "world"));         // ERROR: param 1 expects 'float' but got 'string'
+
+  int x = "hello";                      // ERROR: cannot assign 'string' to 'int'
+  int y = 42;
+  y = "oops";                           // ERROR: cannot assign 'string' to 'int'
+
+  // Untyped (dynamic) variables accept anything — no errors:
+  z = 42;
+  z = "hello";                          // OK, z is dynamic
+
+
+BUILT-IN FUNCTIONS:
+-------------------
+  print(x);               Prints to console (any type)
+  len(x);                 Length of string, list, or map
+  range(n);               Returns list [0, 1, ..., n-1]
+  type(x);                Returns type name as string
+  append(list, value);    Appends value to a list
+
+  input("prompt");        Reads line from user. Return type depends on
+                          the variable declaration:
+
+    x = input("prompt");         -> returns string (default)
+    string s = input("prompt");  -> returns string
+    int n = input("Enter num");  -> parses input as integer
+    float f = input("Decimal");  -> parses input as float
+    bool b = input("Yes?");      -> bool rules:
+                                      "true"  -> true
+                                      "false" -> false
+                                      empty / spaces / tabs / just Enter -> false
+                                      any letters (a-z, A-Z) or digits -> true
+
+
+MEMORY (MANUAL):
+----------------
+  x = alloc int(42);      // manually allocate
+  print(*x);              // dereference pointer
+  free x;                 // manually free
+
+
+ERROR:
+------
+  throw "Something went wrong!";   // halts program with error message
+
+
+STRING ESCAPE SEQUENCES:
+-----------------------
+  \n   newline
+  \t   tab
+  \\   backslash
+  \"   double quote
+  \r   carriage return
+  \0   null character
+
+  Example: print("Hello\nWorld");   // prints on two lines
+
+
+COMMENTS:
+---------
+  // This is a single-line comment
+
+  /* This is a
+     multi-line comment */
+
+
+================================================================================
+COMPLETE EXAMPLE PROGRAM
+================================================================================
+
+  // fibonacci.42AHH
+
+  tantrum int fib(int n)
+  {
+      if (n <= 1)
+      {
+          return n;
+      }
+      return fib(n - 1) + fib(n - 2);
+  }
+
+  tantrum main()
+  {
+      print("Fibonacci sequence:");
+      for i in range(10)
+      {
+          print(fib(i));
+      }
+
+      list names = ["Alice", "Bob", "Charlie"];
+      for name in names
+      {
+          print("Hello, " + name + "!");
+      }
+
+      int x = 100;
+      if (x >= 50 and x =< 200)
+      {
+          print("x is between 50 and 200");
+      }
+
+      print("Done!");
+  }
+
+
+================================================================================
+BUILD FROM SOURCE
+================================================================================
+
+  Requirements: CMake 3.15+, C++23 compiler (MSVC / GCC / Clang)
+
+  cmake -B build -S .
+  cmake --build build
+
+  Then run:
+  .\build\Debug\tantrums.exe run your_program.42AHH
+
+================================================================================

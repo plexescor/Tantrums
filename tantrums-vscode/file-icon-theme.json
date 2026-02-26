@@ -1,0 +1,15 @@
+{
+    "iconDefinitions": {
+        "tantrums-source": {
+            "iconPath": "./icons/tantrums-source.png"
+        },
+        "tantrums-bytecode": {
+            "iconPath": "./icons/tantrums-bytecode.png"
+        }
+    },
+    "fileExtensions": {
+        "42AHH": "tantrums-source",
+        "42ahh": "tantrums-source",
+        "42ass": "tantrums-bytecode"
+    }
+}

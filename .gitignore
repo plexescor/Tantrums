@@ -1,0 +1,38 @@
+# Build output
+build/
+out/
+cmake-build-*/
+
+# Compiled bytecode
+*.42ass
+
+# IDE / Editor
+.vs/
+.vscode/
+*.user
+*.suo
+*.sln
+*.vcxproj*
+
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Binaries
+*.exe
+*.obj
+*.o
+*.pdb
+*.ilk
+*.lib
+*.dll
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Gemini / Antigravity
+.gemini/

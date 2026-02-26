@@ -1,0 +1,318 @@
+================================================================================
+                        TANTRUMS PROGRAMMING LANGUAGE
+                           Master Planning Document
+================================================================================
+
+This file is the single source of truth for the Tantrums language.
+Any AI or developer working on this project should read this FIRST.
+Expand sections as decisions are made. Mark undecided items with [TBD].
+
+Last updated: 2026-02-25
+
+
+================================================================================
+SECTION 1: OVERVIEW
+================================================================================
+
+Language Name    : Tantrums
+File Extension   : .42AHH
+Written In       : C and C++ (pure, no external deps for core)
+Execution Model  : Bytecode interpreter (v1), Native compiler (v2, later)
+                   - "tantrums run file.42AHH"   → interpreted via bytecode VM
+                   - "tantrums build file.42AHH"  → compiled to native binary (future)
+
+
+================================================================================
+SECTION 2: TYPE SYSTEM
+================================================================================
+
+Mode: Dual — switchable per file
+  - Default: Dynamic typing (no type annotations needed)
+  - Optional: Static typing, enabled by putting "strict;" at top of file
+
+Built-in Types (v1):
+  - int       : integer numbers
+  - float     : floating point numbers
+  - string    : immutable, UTF-8 text
+  - bool      : explicit true / false only (no truthy/falsy like JS)
+  - list      : ordered, mutable, dynamic-size collection (NOT arrays)
+  - map       : key-value dictionary
+
+[TBD] Additional types for future versions
+
+
+================================================================================
+SECTION 3: SYNTAX RULES
+================================================================================
+
+Style: C-like, brace-delimited { }
+       NO indentation-based syntax. Ever.
+
+Variable:
+int x = 5;
+x = 5; (both dynamic and static)
+
+both: int x = 5;
+        x = 5;
+
+functions:
+tantrum _returnType_ name(args)
+{
+    //Do something 
+} //Return type not mandatory
+
+If statement:
+
+if (condition)
+{
+    //Do something
+}
+else if (condition)
+{
+    //Do something
+}
+else
+{
+    //Do something
+}
+
+
+for loop:
+Python style
+for i in range(10)
+{
+    //Do something
+}
+
+//Can also take strings and lists
+
+for i in "Hello"
+{
+    //Do something
+}
+for i in [1, 2, 3, 4, 5]
+{
+    //Do something
+}
+
+//Same concept for while loop
+while (condition)
+{
+    //Do something
+}
+
+Operators:
++
+-
+/
+*
+%
+==
+!=
+<
+>
+<=
+>=
+=>
+=<
+(//For greater than or equal to and same typa shit for all thing, they can be reversed, liek this: => or =<)
+&& (//Can also be "and")
+|| (//Can also be "or")
+!
+
+Comment syntax:
+  - // for single-line comments
+  - /* for multi-line comments
+  - /* ... */
+
+//String treated as a literal list of characters
+
+--- ADD SYNTAX RULES BELOW AS THEY ARE DECIDED ---
+
+
+
+================================================================================
+SECTION 4: MEMORY MANAGEMENT
+================================================================================
+
+Dual-mode memory:
+
+  AUTO (default):
+    - Reference counting with cycle collector
+    - User never thinks about memory
+    - Objects freed automatically when no longer referenced
+
+  MANUAL (opt-in):
+    - Simple alloc / free keywords
+    - Example: x = alloc int(42);
+              free x;
+    - No malloc/sizeof nonsense
+
+Pointers:
+    - Exist, use & (address-of) and * (dereference) like C
+    - Safe by default: null dereference = clean error, NOT a segfault
+    - NO pointer arithmetic allowed
+    - Example: p = &x;
+              print(*p);
+              *p = 20;
+
+
+================================================================================
+SECTION 5: BUILT-IN FUNCTIONS
+================================================================================
+
+Core built-ins (always available, no import needed):
+  print(x) : Prints x to the console
+  int x = input("Enter something: ") : Takes input from the user 
+  len(x)   : Returns the length of x
+
+--- ADD BUILT-IN FUNCTIONS BELOW AS THEY ARE DECIDED ---
+
+
+
+================================================================================
+SECTION 6: MODULE SYSTEM
+================================================================================
+
+Import keyword: use
+Syntax: use <module_name>
+
+Modules are implemented as C/C++ native code registered into the VM.
+No header files, no preprocessor.
+
+C/C++ FFI (Foreign Function Interface):
+  - Tantrums can call C/C++ functions directly
+  - Syntax:
+      foreign "C" {
+          sin(x: float) -> float;
+          cos(x: float) -> float;
+      }
+
+Standard Modules (planned):
+  v2: math, fs, io
+  v3: window (wraps GLFW/SDL2), graphics (wraps OpenGL)
+  v4: graphics-vulkan (wraps Vulkan), audio, net
+
+
+================================================================================
+SECTION 7: PLANNED MODULES — GRAPHICS & WINDOWING
+================================================================================
+
+Vision: Tantrums should support game dev / graphics programming.
+
+  - window   : Window creation, input, events (wraps GLFW or SDL2)
+  - graphics : Rendering (wraps OpenGL for v1, Vulkan for v2)
+  - audio    : [TBD]
+  - net      : [TBD]
+
+These modules are C/C++ code under the hood. The user calls clean
+Tantrums functions and never touches C.
+
+
+================================================================================
+SECTION 8: ERROR HANDLING
+================================================================================
+
+Errors via console, like to throw an error intentionally, user can:
+
+throw "Error message";
+
+With try, catch blocks,
+the bytecode runner will throw errors idk: TBD
+
+No exceptions (too complex to implement in the VM).
+
+
+================================================================================
+SECTION 9: COMPILER / INTERPRETER ARCHITECTURE
+================================================================================
+
+Pipeline:
+  Source (.42AHH)  →  Lexer (tokens)
+                   →  Parser (AST)
+                   →  Semantic Analysis (type check, variable resolution)
+                   →  Code Generator (bytecode)
+                   →  VM (executes bytecode)
+
+Project structure (planned):
+  src/
+    lexer.c           Tokenizer
+    parser.c          AST builder
+    ast.h             AST node definitions
+    compiler.c        AST → Bytecode
+    vm.c              Bytecode executor
+    value.c           Value types (int, string, list, etc.)
+    memory.c          Reference counting + GC
+    builtins.c        Core built-in functions
+    modules/
+      mod_math.c      math module
+      mod_fs.c        file system module
+      mod_io.c        I/O module
+  include/
+    *.h               Headers
+  main.c              Entry point, REPL
+
+Core engine in C for speed. Module glue and higher-level
+parts can use C++ for convenience (std::unordered_map etc).
+
+
+================================================================================
+SECTION 10: VERSIONING / ROADMAP
+================================================================================
+
+v1 — Core language:
+  [ ] Lexer, parser, AST
+  [ ] Bytecode compiler + VM
+  [ ] Variables, functions, control flow
+  [ ] Built-in types (int, float, string, bool, list, map)
+  [ ] Reference counting memory
+  [ ] Manual memory (alloc/free)
+  [ ] Pointers (safe)
+  [ ] Core built-in functions
+  [ ] REPL
+
+v2 — Standard library + FFI:
+  [ ] Module system (use keyword)
+  [ ] C/C++ FFI (foreign keyword)
+  [ ] math, fs, io modules
+  [ ] Static typing mode (strict;)
+
+v3 — Graphics:
+  [ ] window module (GLFW/SDL2)
+  [ ] graphics module (OpenGL)
+
+v4 — Advanced:
+  [ ] Vulkan backend
+  [ ] Native compiler (transpile to C or LLVM)
+  [ ] audio, net modules
+
+
+================================================================================
+SECTION 11: KEYWORDS (ACTIVE LIST)
+================================================================================
+
+--- ADD KEYWORDS BELOW AS THEY ARE DECIDED ---
+
+Reserved so far:
+  STRICT       (enables static typing for the file)
+  true         (boolean literal)
+  false        (boolean literal)
+  alloc        (manual memory allocation)
+  free         (manual memory deallocation)
+  use          (import a module)
+  foreign      (declare C/C++ functions)
+
+return is return
+
+
+================================================================================
+SECTION 12: CUSTOM INSTRUCTIONS / NOTES
+================================================================================
+
+--- ADD ANYTHING ELSE BELOW ---
+
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

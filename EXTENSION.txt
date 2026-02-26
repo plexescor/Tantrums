@@ -1,0 +1,150 @@
+================================================================================
+               TANTRUMS VS CODE EXTENSION — GUIDE
+================================================================================
+
+Version  : 0.2.0
+Extension folder: tantrums-vscode/
+
+
+================================================================================
+INSTALLATION
+================================================================================
+
+  The extension is auto-installed to:
+    %USERPROFILE%\.vscode\extensions\tantrums-dev.tantrums-lang-0.2.0\
+
+  To manually install:
+    1. Copy the tantrums-vscode/ folder to the path above
+    2. Restart VS Code
+    3. Open any .42AHH file — the extension activates automatically
+
+  For file icons:
+    File > Preferences > File Icon Theme > "Tantrums File Icons"
+
+
+================================================================================
+FEATURES — IMPLEMENTED
+================================================================================
+
+  SYNTAX HIGHLIGHTING:
+  --------------------
+  [x] Keywords         tantrum, return, if, else, for, while, in, true, false,
+                       alloc, free, throw, and, or, use, foreign, STRICT
+  [x] Types            int, float, string, bool, list, map
+  [x] Operators        + - * / % == != < > <= >= => =< && || ! & *
+  [x] Compound ops     ++ -- += -= *= /= %=
+  [x] Strings          "..." with escape sequences \n \t \\ \" \r \0
+  [x] Invalid escapes  Bad escape sequences flagged in red
+  [x] Comments         // single line,  /* multi-line */
+  [x] Numbers          integers and floats
+  [x] Built-ins        print, input, len, range, type, append (colored)
+  [x] Function decls   tantrum keyword + function name in distinct colors
+  [x] Typed variables  type + var name highlighted separately
+  [x] Import paths     use filename.42AHH shown as string
+
+  AUTOCOMPLETE / INTELLISENSE:
+  ----------------------------
+  [x] Snippet: tantrum function (with/without return type)
+  [x] Snippet: main() entry point
+  [x] Snippet: if / if-else / if-else if-else
+  [x] Snippet: for-in loop / for-range loop
+  [x] Snippet: while loop
+  [x] Snippet: all built-in functions with parameter hints
+  [x] Snippet: typed variable declarations (int, float, string, bool, list, map)
+  [x] Snippet: input variants (int/float/bool input)
+  [x] Snippet: use import, throw, alloc, return, len, append, type, range
+  [x] Autocomplete: all keywords and types
+  [x] Autocomplete: user-defined functions (discovered from current file)
+  [x] Autocomplete: variable names (discovered from current file)
+  [x] Built-in functions show param signatures in detail popup
+
+  ERROR HIGHLIGHTING (DIAGNOSTICS):
+  ----------------------------------
+  [x] Missing semicolons at end of statements (yellow warning)
+  [x] Unclosed braces { }, brackets [ ], parentheses ( )
+  [x] Mismatched brackets (e.g., ( closed with })
+  [x] Unterminated string literals
+  [x] Empty conditions in if() / while()
+  [x] Possible = instead of == in conditions
+  [x] Type mismatch errors on function calls (red error)
+      e.g., passing string to float param
+
+  HOVER DOCUMENTATION:
+  --------------------
+  [x] Hover over built-in functions → shows signature + description
+  [x] Hover over keywords → shows one-line usage + description
+  [x] Hover over types → shows type info + example
+  [x] Rich markdown tooltips with code blocks
+
+  COMMANDS (Ctrl+Shift+P):
+  -------------------------
+  [x] "Tantrums: Run File"        → tantrums run <file.42AHH>
+  [x] "Tantrums: Compile File"    → tantrums compile <file.42AHH>
+  [x] "Tantrums: Execute Bytecode"→ tantrums exec <file.42ass>
+  [x] Output in dedicated "Tantrums" terminal
+  [x] Run button in editor title bar (▶)
+  [x] Right-click context menu (Run / Compile)
+  [x] Auto-save before running
+
+  BRACKET MATCHING:
+  -----------------
+  [x] Match { } ( ) [ ]
+  [x] Highlight matching brackets on cursor
+
+  CODE FOLDING:
+  -------------
+  [x] Fold { } blocks
+  [x] Fold /* */ multi-line comments
+  [x] Region folding: // #region / // #endregion
+
+  LANGUAGE CONFIGURATION:
+  -----------------------
+  [x] Auto-close brackets { } ( ) [ ]
+  [x] Auto-close strings "
+  [x] Auto-close block comments /* */
+  [x] Comment toggling with Ctrl+/
+  [x] Auto-indent after { (4 spaces)
+  [x] Auto-outdent on }
+
+  FILE ICONS:
+  -----------
+  [x] Custom purple icon for .42AHH source files
+  [x] Custom teal icon for .42ass bytecode files
+
+
+================================================================================
+FEATURES — TBD (Future)
+================================================================================
+
+  [ ] Go to definition      (Ctrl+Click on function name)
+  [ ] Find all references   (Shift+F12)
+  [ ] Rename symbol         (F2)
+  [ ] Debugger integration  (breakpoints, step through)
+  [ ] Outline view          (functions/variables in side panel)
+  [ ] Semantic highlighting  (context-aware coloring)
+  [ ] Cross-file IntelliSense (autocomplete from imported files)
+  [ ] Error squiggles from actual compiler output
+  [ ] Formatting / auto-format (Shift+Alt+F)
+  [ ] .vsix packaging       (installable from marketplace)
+  [ ] Workspace settings     (tantrums.compilerPath, etc.)
+
+
+================================================================================
+FILE STRUCTURE
+================================================================================
+
+  tantrums-vscode/
+  ├── package.json                  Extension manifest + commands
+  ├── extension.js                  Main logic (diagnostics, hover, etc.)
+  ├── language-configuration.json   Brackets, comments, indentation
+  ├── file-icon-theme.json          File icon mappings
+  ├── syntaxes/
+  │   └── tantrums.tmLanguage.json  TextMate grammar (syntax highlighting)
+  ├── snippets/
+  │   └── tantrums.json             Code snippets (30+)
+  └── icons/
+      ├── tantrums-source.png       .42AHH file icon
+      └── tantrums-bytecode.png     .42ass file icon
+
+
+================================================================================

@@ -1,0 +1,199 @@
+{
+    "Tantrums: Function": {
+        "prefix": "tantrum",
+        "body": [
+            "tantrum ${1:returnType} ${2:name}(${3:args})",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "Define a Tantrums function with return type"
+    },
+    "Tantrums: Void Function": {
+        "prefix": "tantrumvoid",
+        "body": [
+            "tantrum ${1:name}(${2:args})",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "Define a Tantrums function without return type"
+    },
+    "Tantrums: Main Function": {
+        "prefix": "main",
+        "body": [
+            "tantrum main()",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "Main entry point function"
+    },
+    "If Block": {
+        "prefix": "if",
+        "body": [
+            "if (${1:condition})",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "If statement block"
+    },
+    "If-Else Block": {
+        "prefix": "ifelse",
+        "body": [
+            "if (${1:condition})",
+            "{",
+            "    $2",
+            "}",
+            "else",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "If-else statement block"
+    },
+    "If-Else If-Else": {
+        "prefix": "ifelseif",
+        "body": [
+            "if (${1:condition})",
+            "{",
+            "    $2",
+            "}",
+            "else if (${3:condition})",
+            "{",
+            "    $4",
+            "}",
+            "else",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "If-else if-else block"
+    },
+    "For-In Loop": {
+        "prefix": "for",
+        "body": [
+            "for ${1:i} in ${2:iterable}",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "For-in loop"
+    },
+    "For Range Loop": {
+        "prefix": "forrange",
+        "body": [
+            "for ${1:i} in range(${2:n})",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "For loop with range"
+    },
+    "While Loop": {
+        "prefix": "while",
+        "body": [
+            "while (${1:condition})",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "While loop"
+    },
+    "Print": {
+        "prefix": "print",
+        "body": "print(${1:value});",
+        "description": "Print a value to console"
+    },
+    "Input String": {
+        "prefix": "input",
+        "body": "${1:var} = input(${2:\"prompt\"});",
+        "description": "Read string input from user"
+    },
+    "Input Integer": {
+        "prefix": "inputint",
+        "body": "int ${1:var} = input(${2:\"prompt\"});",
+        "description": "Read integer input (auto-cast)"
+    },
+    "Input Float": {
+        "prefix": "inputfloat",
+        "body": "float ${1:var} = input(${2:\"prompt\"});",
+        "description": "Read float input (auto-cast)"
+    },
+    "Input Bool": {
+        "prefix": "inputbool",
+        "body": "bool ${1:var} = input(${2:\"prompt\"});",
+        "description": "Read boolean input (auto-cast)"
+    },
+    "Integer Variable": {
+        "prefix": "int",
+        "body": "int ${1:name} = ${2:0};",
+        "description": "Declare an integer variable"
+    },
+    "Float Variable": {
+        "prefix": "float",
+        "body": "float ${1:name} = ${2:0.0};",
+        "description": "Declare a float variable"
+    },
+    "String Variable": {
+        "prefix": "string",
+        "body": "string ${1:name} = \"${2}\";",
+        "description": "Declare a string variable"
+    },
+    "Boolean Variable": {
+        "prefix": "bool",
+        "body": "bool ${1:name} = ${2|true,false|};",
+        "description": "Declare a boolean variable"
+    },
+    "List Variable": {
+        "prefix": "list",
+        "body": "list ${1:name} = [${2}];",
+        "description": "Declare a list variable"
+    },
+    "Map Variable": {
+        "prefix": "map",
+        "body": "map ${1:name} = {\"${2:key}\": ${3:value}};",
+        "description": "Declare a map variable"
+    },
+    "Use Import": {
+        "prefix": "use",
+        "body": "use ${1:filename}.42AHH;",
+        "description": "Import another Tantrums file"
+    },
+    "Throw Error": {
+        "prefix": "throw",
+        "body": "throw \"${1:error message}\";",
+        "description": "Throw an error"
+    },
+    "Alloc": {
+        "prefix": "alloc",
+        "body": "alloc ${1:type}(${2:value})",
+        "description": "Manually allocate memory"
+    },
+    "Return": {
+        "prefix": "return",
+        "body": "return ${1:value};",
+        "description": "Return from function"
+    },
+    "Len": {
+        "prefix": "len",
+        "body": "len(${1:value})",
+        "description": "Get length of string, list, or map"
+    },
+    "Append": {
+        "prefix": "append",
+        "body": "append(${1:list}, ${2:value});",
+        "description": "Append value to list"
+    },
+    "Type Check": {
+        "prefix": "type",
+        "body": "type(${1:value})",
+        "description": "Get type name of a value"
+    },
+    "Range": {
+        "prefix": "range",
+        "body": "range(${1:n})",
+        "description": "Generate a range [0, n)"
+    }
+}

@@ -1,0 +1,101 @@
+{
+    "name": "tantrums-lang",
+    "displayName": "Tantrums Language",
+    "description": "Full language support for Tantrums (.42AHH) — syntax highlighting, IntelliSense, diagnostics, hover docs, and commands",
+    "version": "0.2.0",
+    "publisher": "tantrums-dev",
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Snippets",
+        "Linters"
+    ],
+    "main": "./extension.js",
+    "activationEvents": [
+        "onLanguage:tantrums"
+    ],
+    "icon": "icons/tantrums-source.png",
+    "contributes": {
+        "languages": [
+            {
+                "id": "tantrums",
+                "aliases": [
+                    "Tantrums",
+                    "tantrums"
+                ],
+                "extensions": [
+                    ".42AHH",
+                    ".42ahh"
+                ],
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./icons/tantrums-source.png",
+                    "dark": "./icons/tantrums-source.png"
+                }
+            }
+        ],
+        "grammars": [
+            {
+                "language": "tantrums",
+                "scopeName": "source.tantrums",
+                "path": "./syntaxes/tantrums.tmLanguage.json"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "tantrums",
+                "path": "./snippets/tantrums.json"
+            }
+        ],
+        "commands": [
+            {
+                "command": "tantrums.runFile",
+                "title": "Tantrums: Run File",
+                "icon": "$(play)",
+                "enablement": "resourceExtname == .42AHH"
+            },
+            {
+                "command": "tantrums.compileFile",
+                "title": "Tantrums: Compile File",
+                "icon": "$(package)",
+                "enablement": "resourceExtname == .42AHH"
+            },
+            {
+                "command": "tantrums.execBytecode",
+                "title": "Tantrums: Execute Bytecode",
+                "icon": "$(run)",
+                "enablement": "resourceExtname == .42ass"
+            }
+        ],
+        "menus": {
+            "editor/title/run": [
+                {
+                    "command": "tantrums.runFile",
+                    "when": "resourceExtname == .42AHH",
+                    "group": "navigation"
+                }
+            ],
+            "editor/context": [
+                {
+                    "command": "tantrums.runFile",
+                    "when": "resourceExtname == .42AHH",
+                    "group": "tantrums@1"
+                },
+                {
+                    "command": "tantrums.compileFile",
+                    "when": "resourceExtname == .42AHH",
+                    "group": "tantrums@2"
+                }
+            ]
+        },
+        "iconThemes": [
+            {
+                "id": "tantrums-icons",
+                "label": "Tantrums File Icons",
+                "path": "./file-icon-theme.json"
+            }
+        ]
+    }
+}
