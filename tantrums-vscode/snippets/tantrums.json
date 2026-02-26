@@ -84,7 +84,7 @@
     "For Range Loop": {
         "prefix": "forrange",
         "body": [
-            "for ${1:i} in range(${2:n})",
+            "for ${1:i} in range(${2:start}, ${3:end})",
             "{",
             "    $0",
             "}"
@@ -193,8 +193,8 @@
     },
     "Range": {
         "prefix": "range",
-        "body": "range(${1:n})",
-        "description": "Generate a range [0, n)"
+        "body": "range(${1:start}, ${2:end})",
+        "description": "Generate a range [start, end)"
     },
     "Mode Static": {
         "prefix": "#mode static",

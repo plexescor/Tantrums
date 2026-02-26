@@ -97,6 +97,11 @@ VARIABLES:
   list nums = [1, 2, 3];
   map data = {"name": "john", "age": "21"};
 
+  // Unassigned objects default securely
+  list items;              // automatically initializes as empty list []
+  map kv;                  // automatically initializes as empty map {}
+  int y;                   // defaults to null
+
 
 FUNCTIONS:
 ----------
@@ -237,9 +242,15 @@ BUILT-IN FUNCTIONS:
 -------------------
   print(x);               Prints to console (any type)
   len(x);                 Length of string, list, or map
-  range(n);               Returns list [0, 1, ..., n-1]
+  range([start], end, [step]); Returns list [start, start+step, ..., end)
   type(x);                Returns type name as string
   append(list, value);    Appends value to a list
+
+  getCurrentTime();       Returns current system Unix Epoch time natively in milliseconds
+  toSeconds(ms);          Returns a float parsing input milliseconds to standard seconds
+  toMilliseconds(ms);     Returns a float parsing input milliseconds to ms
+  toMinutes(ms);          Returns a float parsing input milliseconds to minutes
+  toHours(ms);            Returns a float parsing input milliseconds to hours
 
   input("prompt");        Reads line from user. Return type depends on
                           the variable declaration:

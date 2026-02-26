@@ -35,8 +35,8 @@ Built-in Types (v1):
   - float     : floating point numbers
   - string    : immutable, UTF-8 text
   - bool      : explicit true / false only (no truthy/falsy like JS)
-  - list      : ordered, mutable, dynamic-size collection (NOT arrays)
-  - map       : key-value dictionary
+  - list      : ordered, mutable, dynamic-size collection (NOT arrays). Unassigned `list items;` default to `[]`.
+  - map       : key-value dictionary. Unassigned `map kv;` default to `{}`.
 
 [TBD] Additional types for future versions
 
@@ -165,6 +165,8 @@ Core built-ins (always available, no import needed):
   print(x) : Prints x to the console
   int x = input("Enter something: ") : Takes input from the user 
   len(x)   : Returns the length of x
+  getCurrentTime() : Returns the current Unix Epoch system timestamp explicitly in milliseconds.
+  toSeconds(ms) / toMilliseconds(ms) / toMinutes(ms) / toHours(ms) : Conversion functions formatting milliseconds delta.
 
 --- ADD BUILT-IN FUNCTIONS BELOW AS THEY ARE DECIDED ---
 

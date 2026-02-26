@@ -30,7 +30,7 @@ static inline Value NULL_VAL_MAKE()     { Value r; r.type = VAL_NULL;  r.as.inte
 
 typedef enum { OBJ_STRING, OBJ_LIST, OBJ_MAP, OBJ_FUNCTION, OBJ_NATIVE, OBJ_POINTER } ObjType;
 
-struct Obj        { ObjType type; int refcount; bool is_manual; Obj* next; };
+struct Obj        { ObjType type; int refcount; bool is_manual; bool is_marked; Obj* next; };
 struct ObjString  { Obj obj; int length; char* chars; uint32_t hash; };
 struct ObjList    { Obj obj; Value* items; int count; int capacity; };
 

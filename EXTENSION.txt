@@ -60,6 +60,7 @@ FEATURES — IMPLEMENTED
   [x] Autocomplete: user-defined functions (discovered from current file)
   [x] Autocomplete: variable names (discovered from current file)
   [x] Built-in functions show param signatures in detail popup
+  [x] Snippet: Time API routines (getCurrentTime, toSeconds, toMilliseconds, toMinutes, toHours)
 
   ERROR HIGHLIGHTING (DIAGNOSTICS):
   ----------------------------------
@@ -85,6 +86,7 @@ FEATURES — IMPLEMENTED
   [x] Unused typed variables (declared but never used, warning)
   [x] Shadowing built-in function names (warning)
   [x] Empty block body (warning for if/while/for/try/catch)
+  [x] NO MAIN FUNC missing wrapper detection (warning for bare scripts)
 
   HOVER DOCUMENTATION:
   --------------------

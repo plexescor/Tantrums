@@ -1,6 +1,7 @@
 #include "builtins.h"
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 
 /* print(x) — prints value followed by newline */
 static Value native_print(VM* vm, int argc, Value* args) {
@@ -37,15 +38,43 @@ static Value native_len(VM* vm, int argc, Value* args) {
     return INT_VAL(0);
 }
 
-/* range(n) — returns list [0, 1, ..., n-1] */
+/* range([start], end, [step]) — returns list [start, start+step, ..., end) */
 static Value native_range(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return OBJ_VAL(obj_list_new());
-    int64_t n = AS_INT(args[0]);
-    ObjList* list = obj_list_new();
-    for (int64_t i = 0; i < n; i++) {
-        obj_list_append(list, INT_VAL(i));
+    if (argc < 1 || argc > 3) return OBJ_VAL(obj_list_new());
+
+    int64_t start = 0;
+    int64_t end = 0;
+    int64_t step = 1;
+
+    if (argc == 1) {
+        if (!IS_INT(args[0])) return OBJ_VAL(obj_list_new());
+        end = AS_INT(args[0]);
+    } else if (argc == 2) {
+        if (!IS_INT(args[0]) || !IS_INT(args[1])) return OBJ_VAL(obj_list_new());
+        start = AS_INT(args[0]);
+        end = AS_INT(args[1]);
+    } else if (argc == 3) {
+        if (!IS_INT(args[0]) || !IS_INT(args[1]) || !IS_INT(args[2])) return OBJ_VAL(obj_list_new());
+        start = AS_INT(args[0]);
+        end = AS_INT(args[1]);
+        step = AS_INT(args[2]);
     }
+
+    if (step == 0) return OBJ_VAL(obj_list_new()); // Prevent infinite loops
+
+    ObjList* list = obj_list_new();
+    
+    if (step > 0) {
+        for (int64_t i = start; i < end; i += step) {
+            obj_list_append(list, INT_VAL(i));
+        }
+    } else {
+        for (int64_t i = start; i > end; i += step) {
+            obj_list_append(list, INT_VAL(i));
+        }
+    }
+    
     return OBJ_VAL(list);
 }
 
@@ -66,6 +95,45 @@ static Value native_append(VM* vm, int argc, Value* args) {
     return NULL_VAL;
 }
 
+/* ── Time API ─────────────────────────────────────── */
+
+/* getCurrentTime() -> int (milliseconds sequence Unix Epoch) */
+static Value native_getCurrentTime(VM* vm, int argc, Value* args) {
+    (void)vm; (void)argc; (void)args;
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+    return INT_VAL((int64_t)ms);
+}
+
+/* toSeconds(delta_ms) -> float */
+static Value native_toSeconds(VM* vm, int argc, Value* args) {
+    (void)vm;
+    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
+    return FLOAT_VAL((double)AS_INT(args[0]) / 1000.0);
+}
+
+/* toMilliseconds(delta_ms) -> int */
+static Value native_toMilliseconds(VM* vm, int argc, Value* args) {
+    (void)vm;
+    if (argc < 1 || !IS_INT(args[0])) return INT_VAL(0);
+    return INT_VAL(AS_INT(args[0]));
+}
+
+/* toMinutes(delta_ms) -> float */
+static Value native_toMinutes(VM* vm, int argc, Value* args) {
+    (void)vm;
+    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
+    return FLOAT_VAL((double)AS_INT(args[0]) / 60000.0);
+}
+
+/* toHours(delta_ms) -> float */
+static Value native_toHours(VM* vm, int argc, Value* args) {
+    (void)vm;
+    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
+    return FLOAT_VAL((double)AS_INT(args[0]) / 3600000.0);
+}
+
 static void define_native(VM* vm, const char* name, NativeFn fn);
 
 void builtins_register(VM* vm) {
@@ -75,6 +143,13 @@ void builtins_register(VM* vm) {
     define_native(vm, "range",  native_range);
     define_native(vm, "type",   native_type);
     define_native(vm, "append", native_append);
+    
+    // Time API
+    define_native(vm, "getCurrentTime", native_getCurrentTime);
+    define_native(vm, "toSeconds",      native_toSeconds);
+    define_native(vm, "toMilliseconds", native_toMilliseconds);
+    define_native(vm, "toMinutes",      native_toMinutes);
+    define_native(vm, "toHours",        native_toHours);
 }
 
 static void define_native(VM* vm, const char* name, NativeFn fn) {

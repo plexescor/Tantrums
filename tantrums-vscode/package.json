@@ -96,6 +96,78 @@
                 "label": "Tantrums File Icons",
                 "path": "./file-icon-theme.json"
             }
-        ]
+        ],
+        "configurationDefaults": {
+            "editor.tokenColorCustomizations": {
+                "textMateRules": [
+                    {
+                        "scope": "variable.other.tantrums",
+                        "settings": {
+                            "foreground": "#9CDCFE"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.assignment.tantrums",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.arithmetic.tantrums",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.comparison.tantrums",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.compound.tantrums",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.logical.symbol.tantrums",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "keyword.operator.pointer.tantrums",
+                        "settings": {
+                            "foreground": "#D4D4D4"
+                        }
+                    },
+                    {
+                        "scope": "entity.name.function.tantrums",
+                        "settings": {
+                            "foreground": "#DCDCAA"
+                        }
+                    },
+                    {
+                        "scope": "entity.name.function.call.tantrums",
+                        "settings": {
+                            "foreground": "#DCDCAA"
+                        }
+                    },
+                    {
+                        "scope": "support.function.builtin.tantrums",
+                        "settings": {
+                            "foreground": "#DCDCAA"
+                        }
+                    },
+                    {
+                        "scope": "storage.type.tantrums",
+                        "settings": {
+                            "foreground": "#4EC9B0"
+                        }
+                    }
+                ]
+            }
+        }
     }
 }

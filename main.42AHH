@@ -1,0 +1,97 @@
+#mode both;
+
+tantrum int now()
+{
+    return getCurrentTime();
+}
+
+// Function call overhead test
+tantrum int add(int a, int b)
+{
+    return a + b;
+}
+
+// Recursive depth test
+tantrum int recurse(int n)
+{
+    if (n <= 0)
+    {
+        return 0;
+    }
+    return 1 + recurse(n - 1);
+}
+
+tantrum main()
+{
+    int start = now();
+    print("=== TANTRUMS ULTRA STRESS TEST ===");
+
+    // 1️⃣ Arithmetic (5 million ops)
+    int total = 0;
+    for i in range(5000000)
+    {
+        total += (i * 3) % 7;
+    }
+    print("Arithmetic done:", total);
+
+    // 2️⃣ List growth (1 million appends)
+    list lst = [];
+    for i in range(1000000)
+    {
+        append(lst, i);
+    }
+    print("List append done:", len(lst));
+
+    // 3️⃣ Map build + 2M lookups
+    map mp = {};
+    for i in range(500000)
+    {
+        mp[i] = i * 2;
+    }
+
+    int lookup_sum = 0;
+    for i in range(2000000)
+    {
+        lookup_sum += mp[i % 500000];
+    }
+    print("Map lookup done:", lookup_sum);
+
+    // 4️⃣ Function calls (2M)
+    int call_sum = 0;
+    for i in range(2000000)
+    {
+        call_sum += add(i, 1);
+    }
+    print("Function calls done:", call_sum);
+
+    // 5️⃣ Exceptions (100k)
+    for i in range(100000)
+    {
+        try
+        {
+            throw "x";
+        }
+        catch
+        {
+        }
+    }
+    print("Exceptions done");
+
+    // 6️⃣ Controlled recursion depth
+    int depth = recurse(500);
+    print("Recursion depth:", depth);
+
+    // 7️⃣ String building (200k concatenations)
+    string s = "";
+    for i in range(200000)
+    {
+        s = s + "a";
+    }
+    print("String length:", len(s));
+
+    int end = now();
+    int delta = end - start;
+
+    print("TOTAL TIME (ms):", delta);
+    print("TOTAL TIME (seconds):", delta / 1000);
+}

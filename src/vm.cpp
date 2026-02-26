@@ -9,6 +9,8 @@
 #include <cstring>
 #include <cstdlib>
 
+VM* current_vm_for_gc = nullptr;
+
 void vm_init(VM* vm) {
     vm->stack_top = vm->stack;
     vm->frame_count = 0;
@@ -19,6 +21,7 @@ void vm_init(VM* vm) {
 }
 
 void vm_free(VM* vm) {
+    if (current_vm_for_gc == vm) current_vm_for_gc = nullptr;
     table_free(&vm->globals);
     tantrums_free_all_objects();
 }
@@ -263,10 +266,23 @@ static InterpretResult run(VM* vm) {
                 int i = (int)AS_INT(idx);
                 if (i < 0 || i >= s->length) { vm_push(vm, NULL_VAL); }
                 else vm_push(vm, OBJ_VAL(obj_string_new(&s->chars[i], 1)));
-            } else if (IS_MAP(obj) && IS_STRING(idx)) {
-                Value val;
-                if (obj_map_get(AS_MAP(obj), AS_STRING(idx), &val)) vm_push(vm, val);
-                else vm_push(vm, NULL_VAL);
+            } else if (IS_MAP(obj)) {
+                ObjString* s_idx = nullptr;
+                if (IS_STRING(idx)) {
+                    s_idx = AS_STRING(idx);
+                } else if (IS_INT(idx)) {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(idx));
+                    s_idx = obj_string_new(buf, (int)strlen(buf));
+                }
+                if (s_idx) {
+                    Value val;
+                    if (obj_map_get(AS_MAP(obj), s_idx, &val)) vm_push(vm, val);
+                    else vm_push(vm, NULL_VAL);
+                } else {
+                    vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
             } else {
                 vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
                 return INTERPRET_RUNTIME_ERROR;
@@ -281,8 +297,21 @@ static InterpretResult run(VM* vm) {
                 ObjList* l = AS_LIST(obj);
                 int i = (int)AS_INT(idx);
                 if (i >= 0 && i < l->count) l->items[i] = val;
-            } else if (IS_MAP(obj) && IS_STRING(idx)) {
-                obj_map_set(AS_MAP(obj), AS_STRING(idx), val);
+            } else if (IS_MAP(obj)) {
+                ObjString* s_idx = nullptr;
+                if (IS_STRING(idx)) {
+                    s_idx = AS_STRING(idx);
+                } else if (IS_INT(idx)) {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(idx));
+                    s_idx = obj_string_new(buf, (int)strlen(buf));
+                }
+                if (s_idx) {
+                    obj_map_set(AS_MAP(obj), s_idx, val);
+                } else {
+                    vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
+                    return INTERPRET_RUNTIME_ERROR;
+                }
             }
         } break;
 
@@ -622,6 +651,7 @@ InterpretResult vm_interpret(VM* vm, const char* source) {
     if (!script) return INTERPRET_COMPILE_ERROR;
 
     /* Set up VM to run the script */
+    current_vm_for_gc = vm;
     vm_push(vm, OBJ_VAL(script));
     CallFrame* frame = &vm->frames[vm->frame_count++];
     frame->function = script;
@@ -647,6 +677,7 @@ InterpretResult vm_interpret(VM* vm, const char* source) {
 
 InterpretResult vm_interpret_compiled(VM* vm, ObjFunction* script) {
     /* Set up the script in the VM */
+    current_vm_for_gc = vm;
     vm_push(vm, OBJ_VAL(script));
     CallFrame* frame = &vm->frames[vm->frame_count++];
     frame->function = script;

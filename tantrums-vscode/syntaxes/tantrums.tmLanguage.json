@@ -26,6 +26,9 @@
             "include": "#func-declarations"
         },
         {
+            "include": "#typed-variables"
+        },
+        {
             "include": "#func-calls"
         },
         {
@@ -45,9 +48,6 @@
         },
         {
             "include": "#operators"
-        },
-        {
-            "include": "#typed-variables"
         }
     ],
     "repository": {

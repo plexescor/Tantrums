@@ -112,7 +112,16 @@ static TokenType identifier_type(Lexer* l) {
 static Token scan_string(Lexer* l) {
     while (!is_at_end(l) && peek(l) != '"') {
         if (peek(l) == '\n') l->line++;
-        if (peek(l) == '\\') advance(l); /* skip escape */
+        if (peek(l) == '\\') {
+            advance(l); /* skip backslash */
+            if (is_at_end(l)) return error_token(l, "Unterminated string.");
+            
+            char escape = peek(l);
+            if (escape != 'n' && escape != 't' && escape != '\\' && 
+                escape != '"' && escape != 'r' && escape != '0') {
+                return error_token(l, "Invalid escape sequence.");
+            }
+        }
         advance(l);
     }
     if (is_at_end(l)) return error_token(l, "Unterminated string.");

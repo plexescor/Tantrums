@@ -36,3 +36,6 @@ Makefile
 
 # Gemini / Antigravity
 .gemini/
+
+# Tests
+tests/

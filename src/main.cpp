@@ -235,10 +235,11 @@ int main(int argc, char* argv[]) {
         free(bc_path);
         if (!loaded) return 1;
 
-        VM vm;
-        vm_init(&vm);
-        InterpretResult result = vm_interpret_compiled(&vm, loaded);
-        vm_free(&vm);
+        VM* vm = (VM*)malloc(sizeof(VM));
+        vm_init(vm);
+        InterpretResult result = vm_interpret_compiled(vm, loaded);
+        vm_free(vm);
+        free(vm);
 
         return result == INTERPRET_OK ? 0 : 70;
     }
@@ -271,10 +272,11 @@ int main(int argc, char* argv[]) {
         ObjFunction* script = bytecode_read(bc_path);
         if (!script) return 1;
 
-        VM vm;
-        vm_init(&vm);
-        InterpretResult result = vm_interpret_compiled(&vm, script);
-        vm_free(&vm);
+        VM* vm = (VM*)malloc(sizeof(VM));
+        vm_init(vm);
+        InterpretResult result = vm_interpret_compiled(vm, script);
+        vm_free(vm);
+        free(vm);
 
         return result == INTERPRET_OK ? 0 : 70;
     }

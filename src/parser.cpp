@@ -48,6 +48,55 @@ static char* copy_lexeme_str(const char* str, int len) {
     return s;
 }
 
+/* ── Deep clone expressions for compound assignment desugaring ── */
+static ASTNode* ast_clone_expr(ASTNode* node) {
+    if (!node) return nullptr;
+    ASTNode* clone = ast_new(node->type, node->line);
+    switch (node->type) {
+    case NODE_INT_LIT: clone->as.int_literal = node->as.int_literal; break;
+    case NODE_FLOAT_LIT: clone->as.float_literal = node->as.float_literal; break;
+    case NODE_STRING_LIT: 
+        clone->as.string_literal.value = copy_lexeme_str(node->as.string_literal.value, node->as.string_literal.length);
+        clone->as.string_literal.length = node->as.string_literal.length;
+        break;
+    case NODE_BOOL_LIT: clone->as.bool_literal = node->as.bool_literal; break;
+    case NODE_NULL_LIT: break;
+    case NODE_IDENTIFIER:
+        clone->as.identifier.name = copy_lexeme_str(node->as.identifier.name, node->as.identifier.length);
+        clone->as.identifier.length = node->as.identifier.length;
+        break;
+    case NODE_UNARY:
+        clone->as.unary.op = node->as.unary.op;
+        clone->as.unary.operand = ast_clone_expr(node->as.unary.operand);
+        break;
+    case NODE_BINARY:
+        clone->as.binary.op = node->as.binary.op;
+        clone->as.binary.left = ast_clone_expr(node->as.binary.left);
+        clone->as.binary.right = ast_clone_expr(node->as.binary.right);
+        break;
+    case NODE_INDEX:
+        clone->as.index_access.object = ast_clone_expr(node->as.index_access.object);
+        clone->as.index_access.index = ast_clone_expr(node->as.index_access.index);
+        break;
+    case NODE_CALL:
+        clone->as.call.callee = ast_clone_expr(node->as.call.callee);
+        clone->as.call.arg_count = node->as.call.arg_count;
+        if (node->as.call.arg_count > 0) {
+            clone->as.call.args = (ASTNode**)malloc(sizeof(ASTNode*) * node->as.call.arg_count);
+            for(int i = 0; i < node->as.call.arg_count; ++i) {
+                clone->as.call.args[i] = ast_clone_expr(node->as.call.args[i]);
+            }
+        } else {
+            clone->as.call.args = nullptr;
+        }
+        break;
+    default:
+        memcpy(&clone->as, &node->as, sizeof(node->as));
+        break;
+    }
+    return clone;
+}
+
 /* ── Forward declarations ─────────────────────────── */
 static ASTNode* expression(Parser* p);
 static ASTNode* statement(Parser* p);
@@ -331,6 +380,13 @@ static ASTNode* block(Parser* p) {
     return n;
 }
 
+static ASTNode* statement_or_block(Parser* p) {
+    if (match(p, TOKEN_LEFT_BRACE)) {
+        return block(p);
+    }
+    return statement(p);
+}
+
 static bool is_type_token(TokenType t) {
     return t == TOKEN_TYPE_INT || t == TOKEN_TYPE_FLOAT || t == TOKEN_TYPE_STRING ||
            t == TOKEN_TYPE_BOOL || t == TOKEN_TYPE_LIST || t == TOKEN_TYPE_MAP;
@@ -341,15 +397,13 @@ static ASTNode* if_statement(Parser* p) {
     consume(p, TOKEN_LEFT_PAREN, "Expected '(' after 'if'.");
     n->as.if_stmt.cond = expression(p);
     consume(p, TOKEN_RIGHT_PAREN, "Expected ')'.");
-    consume(p, TOKEN_LEFT_BRACE, "Expected '{'.");
-    n->as.if_stmt.then_b = block(p);
+    n->as.if_stmt.then_b = statement_or_block(p);
     n->as.if_stmt.else_b = nullptr;
     if (match(p, TOKEN_ELSE)) {
         if (match(p, TOKEN_IF)) {
             n->as.if_stmt.else_b = if_statement(p);
         } else {
-            consume(p, TOKEN_LEFT_BRACE, "Expected '{'.");
-            n->as.if_stmt.else_b = block(p);
+            n->as.if_stmt.else_b = statement_or_block(p);
         }
     }
     return n;
@@ -360,8 +414,7 @@ static ASTNode* while_statement(Parser* p) {
     consume(p, TOKEN_LEFT_PAREN, "Expected '(' after 'while'.");
     n->as.while_stmt.cond = expression(p);
     consume(p, TOKEN_RIGHT_PAREN, "Expected ')'.");
-    consume(p, TOKEN_LEFT_BRACE, "Expected '{'.");
-    n->as.while_stmt.body = block(p);
+    n->as.while_stmt.body = statement_or_block(p);
     return n;
 }
 
@@ -371,8 +424,7 @@ static ASTNode* for_statement(Parser* p) {
     n->as.for_in.var_name = copy_lexeme(var);
     consume(p, TOKEN_IN, "Expected 'in' after variable in for loop.");
     n->as.for_in.iterable = expression(p);
-    consume(p, TOKEN_LEFT_BRACE, "Expected '{'.");
-    n->as.for_in.body = block(p);
+    n->as.for_in.body = statement_or_block(p);
     return n;
 }
 
@@ -491,7 +543,9 @@ static ASTNode* statement(Parser* p) {
     }
 
     /* Compound assignment: += -= *= /= %= */
-    if (expr->type == NODE_IDENTIFIER &&
+    if ((expr->type == NODE_IDENTIFIER ||
+         expr->type == NODE_INDEX ||
+         (expr->type == NODE_UNARY && expr->as.unary.op == TOKEN_STAR)) &&
         (check(p, TOKEN_PLUS_EQUAL) || check(p, TOKEN_MINUS_EQUAL) ||
          check(p, TOKEN_STAR_EQUAL) || check(p, TOKEN_SLASH_EQUAL) ||
          check(p, TOKEN_PERCENT_EQUAL))) {
@@ -506,22 +560,41 @@ static ASTNode* statement(Parser* p) {
         case TOKEN_PERCENT_EQUAL: op = TOKEN_PERCENT; break;
         default:                  op = TOKEN_PLUS; break;
         }
-        /* Desugar: i op= rhs → i = i op rhs */
-        ASTNode* var_ref = ast_new(NODE_IDENTIFIER, expr->line);
-        var_ref->as.identifier.name = copy_lexeme_str(expr->as.identifier.name, (int)strlen(expr->as.identifier.name));
-        var_ref->as.identifier.length = (int)strlen(expr->as.identifier.name);
         ASTNode* rhs = expression(p);
+
+        ASTNode* lhs_read = ast_clone_expr(expr);
         ASTNode* bin = ast_new(NODE_BINARY, expr->line);
         bin->as.binary.op = op;
-        bin->as.binary.left = var_ref;
+        bin->as.binary.left = lhs_read;
         bin->as.binary.right = rhs;
-        ASTNode* n = ast_new(NODE_ASSIGN, expr->line);
-        n->as.assign.name = (char*)malloc(strlen(expr->as.identifier.name) + 1);
-        strcpy(n->as.assign.name, expr->as.identifier.name);
-        ast_free(expr);
-        n->as.assign.value = bin;
-        consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment.");
-        return n;
+
+        if (expr->type == NODE_IDENTIFIER) {
+            /* Desugar: i op= rhs → i = i op rhs */
+            ASTNode* n = ast_new(NODE_ASSIGN, expr->line);
+            n->as.assign.name = copy_lexeme_str(expr->as.identifier.name, expr->as.identifier.length);
+            ast_free(expr);
+            n->as.assign.value = bin;
+            consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment.");
+            return n;
+        } else if (expr->type == NODE_INDEX) {
+            /* Desugar: m[k] op= rhs → m[k] = m[k] op rhs */
+            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
+            n->as.index_assign.object = expr->as.index_access.object;
+            n->as.index_assign.index = expr->as.index_access.index;
+            n->as.index_assign.value = bin;
+            free(expr); // Free top level, but not the object/index pointer
+            consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment.");
+            return n;
+        } else {
+            /* Desugar: *ptr op= rhs → *ptr = *ptr op rhs */
+            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
+            n->as.index_assign.object = expr->as.unary.operand;
+            n->as.index_assign.index = nullptr;
+            n->as.index_assign.value = bin;
+            free(expr);
+            consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment.");
+            return n;
+        }
     }
 
     /* Check for assignment: ident = expr */
@@ -578,20 +651,31 @@ static ASTNode* declaration(Parser* p) {
         return n;
     }
     if (match(p, TOKEN_TANTRUM)) return func_declaration(p);
-    /* Typed variable declaration: int x = 5; */
-    if (is_type_token(peek_tok(p)->type) && p->current + 1 < p->tokens->count &&
-        p->tokens->tokens[p->current + 1].type == TOKEN_IDENTIFIER) {
-        Token* type = advance_tok(p);
-        Token* name = advance_tok(p);
-        ASTNode* n = ast_new(NODE_VAR_DECL, type->line);
-        n->as.var_decl.type_name = copy_lexeme(type);
-        n->as.var_decl.name = copy_lexeme(name);
-        n->as.var_decl.init = nullptr;
-        if (match(p, TOKEN_EQUAL)) {
-            n->as.var_decl.init = expression(p);
+    /* Typed variable declaration: int x = 5; or int* p = alloc ...; */
+    if (is_type_token(peek_tok(p)->type)) {
+        bool is_pointer = false;
+        int name_idx = p->current + 1;
+        if (p->tokens->tokens[name_idx].type == TOKEN_STAR) {
+            is_pointer = true;
+            name_idx++;
         }
-        consume(p, TOKEN_SEMICOLON, "Expected ';' after variable declaration.");
-        return n;
+        if (name_idx < p->tokens->count && p->tokens->tokens[name_idx].type == TOKEN_IDENTIFIER) {
+            Token* type = advance_tok(p);
+            if (is_pointer) advance_tok(p); /* Skip the * token */
+            Token* name = advance_tok(p);
+            
+            ASTNode* n = ast_new(NODE_VAR_DECL, type->line);
+            n->as.var_decl.type_name = copy_lexeme(type);
+            /* Mark pointer type internally (can append '*' or flag, but keeping syntax simple for now) */
+            n->as.var_decl.name = copy_lexeme(name);
+            n->as.var_decl.init = nullptr;
+            
+            if (match(p, TOKEN_EQUAL)) {
+                n->as.var_decl.init = expression(p);
+            }
+            consume(p, TOKEN_SEMICOLON, "Expected ';' after variable declaration.");
+            return n;
+        }
     }
     return statement(p);
 }

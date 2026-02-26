@@ -50,11 +50,81 @@ function deactivate() {
 //  MASTER LINT
 // ============================================================
 
+function stripAllComments(text) {
+    var result = '';
+    var inStr = false;
+    var inBlock = false;
+    var inLine = false;
+
+    for (var i = 0; i < text.length; i++) {
+        var c = text[i];
+        var nx = i + 1 < text.length ? text[i + 1] : '';
+
+        if (inBlock) {
+            if (c === '*' && nx === '/') {
+                result += '  ';
+                inBlock = false;
+                i++;
+            } else {
+                result += (c === '\n' || c === '\r') ? c : ' ';
+            }
+            continue;
+        }
+
+        if (inLine) {
+            if (c === '\n' || c === '\r') {
+                inLine = false;
+                result += c;
+            } else {
+                result += ' ';
+            }
+            continue;
+        }
+
+        if (inStr) {
+            result += c;
+            if (c === '\\') {
+                result += nx;
+                i++;
+            } else if (c === '"') {
+                inStr = false;
+            }
+            continue;
+        }
+
+        if (c === '"') {
+            inStr = true;
+            result += c;
+            continue;
+        }
+
+        if (c === '/' && nx === '*') {
+            inBlock = true;
+            result += '  ';
+            i++;
+            continue;
+        }
+
+        if (c === '/' && nx === '/') {
+            inLine = true;
+            result += '  ';
+            i++;
+            continue;
+        }
+
+        result += c;
+    }
+
+    return result;
+}
+
 function lint(document) {
     if (!document || document.languageId !== 'tantrums') { return; }
 
     var text = document.getText();
-    var lines = text.split(/\r?\n/);
+    var cleanText = stripAllComments(text);
+    var lines = cleanText.split(/\r?\n/);
+    var originalLines = text.split(/\r?\n/);
     var diags = [];
 
     // Pre-parse: collect function signatures and variable declarations
@@ -90,7 +160,10 @@ function lint(document) {
 //  PRE-PARSE: collect function sigs and variable declarations
 // ============================================================
 
-var BUILTIN_FUNCS = { 'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1 };
+var BUILTIN_FUNCS = {
+    'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1,
+    'getCurrentTime': 1, 'toSeconds': 1, 'toMilliseconds': 1, 'toMinutes': 1, 'toHours': 1
+};
 var KEYWORDS = ['tantrum', 'if', 'else', 'while', 'for', 'in', 'return', 'throw', 'alloc',
     'free', 'use', 'and', 'or', 'true', 'false', 'null', 'try', 'catch',
     'int', 'float', 'string', 'bool', 'list', 'map'];
@@ -351,12 +424,14 @@ function checkConditions(lines, diags) {
 function checkFunctionTypes(lines, funcSigs, diags) {
     var skip = {
         'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1,
-        'tantrum': 1, 'if': 1, 'while': 1, 'for': 1, 'catch': 1
+        'tantrum': 1, 'if': 1, 'while': 1, 'for': 1, 'catch': 1,
+        'return': 1, 'throw': 1, 'alloc': 1, 'free': 1,
+        'int': 1, 'float': 1, 'string': 1, 'bool': 1, 'list': 1, 'map': 1
     };
     var callRe = /\b(\w+)\s*\(([^)]*)\)/g;
 
     for (var i = 0; i < lines.length; i++) {
-        var stripped = stripComments(lines[i]);
+        var stripped = stripStrings(stripComments(lines[i]));
         if (/\btantrum\s+/.test(stripped)) { continue; } // skip declarations
         if (/^\s*\/\//.test(lines[i])) { continue; }
 
@@ -486,13 +561,15 @@ function checkDuplicateVariables(lines, diags) {
 function checkUndefinedFunctions(lines, funcSigs, diags) {
     var skip = {
         'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1,
+        'getCurrentTime': 1, 'toSeconds': 1, 'toMilliseconds': 1, 'toMinutes': 1, 'toHours': 1,
         'tantrum': 1, 'if': 1, 'while': 1, 'for': 1, 'catch': 1, 'alloc': 1, 'free': 1,
-        'int': 1, 'float': 1, 'string': 1, 'bool': 1, 'list': 1, 'map': 1
+        'int': 1, 'float': 1, 'string': 1, 'bool': 1, 'list': 1, 'map': 1,
+        'return': 1, 'throw': 1
     };
     var callRe = /\b(\w+)\s*\(/g;
 
     for (var i = 0; i < lines.length; i++) {
-        var stripped = stripComments(lines[i]);
+        var stripped = stripStrings(stripComments(lines[i]));
         if (/\btantrum\s+/.test(stripped)) { continue; }
         if (/^\s*\/\//.test(lines[i])) { continue; }
         if (/^\s*\*/.test(lines[i])) { continue; }
@@ -517,6 +594,7 @@ function checkUndefinedVariables(lines, funcSigs, varDecls, diags) {
     // Collect all known names: functions, params, for-loop vars, globals
     var known = {};
     var builtinNames = ['print', 'input', 'len', 'range', 'type', 'append', 'true', 'false', 'null',
+        'getCurrentTime', 'toSeconds', 'toMilliseconds', 'toMinutes', 'toHours',
         'tantrum', 'if', 'else', 'while', 'for', 'in', 'return', 'throw',
         'alloc', 'free', 'use', 'and', 'or', 'try', 'catch',
         'int', 'float', 'string', 'bool', 'list', 'map', 'main', 'i'];
@@ -596,10 +674,10 @@ function checkReturnOutsideFunction(lines, diags) {
             if (trimmed[c] === '}') { inFunc--; }
         }
         if (inFunc <= 0) {
-            var retMatch = trimmed.match(/^\s*return\b/);
+            var retMatch = trimmed.match(/^\s*(return|throw)\b/);
             if (retMatch) {
                 diags.push(makeDiag(i, 0, lines[i].length,
-                    "'return' used outside of a function.",
+                    "'" + retMatch[1] + "' used outside of a function.",
                     vscode.DiagnosticSeverity.Error));
             }
         }
@@ -783,7 +861,7 @@ var HOVER_DOCS = {
     'print': { sig: 'print(value)', desc: 'Prints any value to the console.' },
     'input': { sig: 'input(prompt?)', desc: 'Reads a line from stdin. Auto-casts to typed variable.' },
     'len': { sig: 'len(value) -> int', desc: 'Returns length of a string, list, or map.' },
-    'range': { sig: 'range(n) -> list', desc: 'Generates list [0, 1, ..., n-1].' },
+    'range': { sig: 'range([start], end, [step]) -> list', desc: 'Generates list [start, start+step, ..., end). If omitted, start=0, step=1.' },
     'type': { sig: 'type(value) -> string', desc: 'Returns the type name as a string.' },
     'append': { sig: 'append(list, value)', desc: 'Appends a value to a list in-place.' },
     'tantrum': { sig: 'tantrum [type] name(params) { ... }', desc: '**Function declaration.** Optional return type.' },
@@ -868,9 +946,14 @@ function doComplete(doc, pos) {
         { name: 'print', insert: 'print(${1:value})', sig: 'print(value)' },
         { name: 'input', insert: 'input(${1:"prompt"})', sig: 'input(prompt?)' },
         { name: 'len', insert: 'len(${1:value})', sig: 'len(value) -> int' },
-        { name: 'range', insert: 'range(${1:n})', sig: 'range(n) -> list' },
+        { name: 'range', insert: 'range(${1:start}, ${2:end})', sig: 'range([start], end, [step]) -> list' },
         { name: 'type', insert: 'type(${1:value})', sig: 'type(value) -> string' },
-        { name: 'append', insert: 'append(${1:list}, ${2:value})', sig: 'append(list, value)' }
+        { name: 'append', insert: 'append(${1:list}, ${2:value})', sig: 'append(list, value)' },
+        { name: 'getCurrentTime', insert: 'getCurrentTime()', sig: 'getCurrentTime() -> int' },
+        { name: 'toSeconds', insert: 'toSeconds(${1:delta_ms})', sig: 'toSeconds(delta_ms) -> float' },
+        { name: 'toMilliseconds', insert: 'toMilliseconds(${1:delta_ms})', sig: 'toMilliseconds(delta_ms) -> int' },
+        { name: 'toMinutes', insert: 'toMinutes(${1:delta_ms})', sig: 'toMinutes(delta_ms) -> float' },
+        { name: 'toHours', insert: 'toHours(${1:delta_ms})', sig: 'toHours(delta_ms) -> float' }
     ];
     for (var b = 0; b < builtins.length; b++) {
         var bi = new vscode.CompletionItem(builtins[b].name, vscode.CompletionItemKind.Function);
@@ -950,6 +1033,13 @@ function stripComments(line) {
     return result;
 }
 
+// Replace string contents with spaces (keeps quotes, blanks inner text)
+function stripStrings(line) {
+    return line.replace(/"([^"\\]|\\.)*"/g, function (m) {
+        return '"' + Array(m.length - 1).join(' ') + '"';
+    });
+}
+
 function splitArgs(str) {
     var args = [];
     var depth = 0;
@@ -1021,7 +1111,8 @@ function checkUnusedVariables(lines, varDecls, diags) {
 
 // --- shadowing built-in keywords ---
 function checkShadowBuiltins(lines, diags) {
-    var builtins = ['print', 'input', 'len', 'range', 'type', 'append'];
+    var builtins = ['print', 'input', 'len', 'range', 'type', 'append',
+        'getCurrentTime', 'toSeconds', 'toMilliseconds', 'toMinutes', 'toHours'];
     var declRe = /\b(?:int|float|string|bool|list|map)\s+(\w+)\s*=/;
     var dynRe = /^(\w+)\s*=\s*[^=]/;
 

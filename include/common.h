@@ -11,8 +11,8 @@
 
 #define TANTRUMS_VERSION "0.1.0"
 
-#define MAX_STACK    1024
-#define MAX_FRAMES   256
+#define MAX_STACK    262144
+#define MAX_FRAMES   16384
 #define MAX_LOCALS   256
 #define MAX_CONSTANTS 65536
 

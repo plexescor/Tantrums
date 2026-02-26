@@ -8,16 +8,21 @@
 Obj* all_objects = nullptr;
 
 static Obj* allocate_obj(size_t size, ObjType type) {
+    tantrums_bytes_allocated += size;
+    if (tantrums_bytes_allocated > tantrums_next_gc) {
+        tantrums_gc_collect();
+    }
     Obj* obj = (Obj*)malloc(size);
     obj->type = type;
     obj->refcount = 1;
     obj->is_manual = false;
+    obj->is_marked = false;
     obj->next = all_objects;
     all_objects = obj;
     return obj;
 }
 
-/* ── String interning table (simple) ──────────────── */
+/* ── String interning table (O(1) Hash Set) ───────── */
 ObjString** intern_table = nullptr;
 int intern_count = 0;
 int intern_cap = 0;
@@ -31,26 +36,73 @@ uint32_t hash_string(const char* key, int length) {
     return h;
 }
 
+static void intern_table_grow() {
+    int new_cap = intern_cap == 0 ? 1024 : intern_cap * 2;
+    ObjString** new_table = (ObjString**)calloc(new_cap, sizeof(ObjString*));
+    
+    for (int i = 0; i < intern_cap; i++) {
+        ObjString* s = intern_table[i];
+        if (!s) continue;
+        
+        uint32_t idx = s->hash & (new_cap - 1);
+        for (;;) {
+            if (!new_table[idx]) {
+                new_table[idx] = s;
+                break;
+            }
+            idx = (idx + 1) & (new_cap - 1);
+        }
+    }
+    
+    free(intern_table);
+    intern_table = new_table;
+    intern_cap = new_cap;
+}
+
 ObjString* obj_string_new(const char* chars, int length) {
     uint32_t h = hash_string(chars, length);
-    /* Check intern table */
-    for (int i = 0; i < intern_count; i++) {
-        ObjString* s = intern_table[i];
-        if (s && s->length == length && s->hash == h && memcmp(s->chars, chars, length) == 0)
-            { s->obj.refcount++; return s; }
+    
+    /* Check intern table linearly resolving collisions */
+    if (intern_cap > 0) {
+        uint32_t idx = h & (intern_cap - 1);
+        for (;;) {
+            ObjString* s = intern_table[idx];
+            if (!s) break; // Slot empty, it doesn't exist
+            if (s->length == length && s->hash == h && memcmp(s->chars, chars, length) == 0) {
+                s->obj.refcount++; 
+                return s; 
+            }
+            idx = (idx + 1) & (intern_cap - 1);
+        }
     }
+    
+    /* Create new string */
     ObjString* s = (ObjString*)allocate_obj(sizeof(ObjString), OBJ_STRING);
+    s->obj.is_manual = true;
     s->length = length;
+    tantrums_bytes_allocated += length + 1;
+    if (tantrums_bytes_allocated > tantrums_next_gc) { tantrums_gc_collect(); }
     s->chars = (char*)malloc(length + 1);
     memcpy(s->chars, chars, length);
     s->chars[length] = '\0';
     s->hash = h;
-    /* Add to intern table */
-    if (intern_count >= intern_cap) {
-        intern_cap = intern_cap < 16 ? 16 : intern_cap * 2;
-        intern_table = (ObjString**)realloc(intern_table, sizeof(ObjString*) * intern_cap);
+    s->obj.is_manual = false;
+    
+    /* Insert into intern table */
+    if (intern_count + 1 > intern_cap * 0.75) {
+        intern_table_grow();
     }
-    intern_table[intern_count++] = s;
+    
+    uint32_t idx = h & (intern_cap - 1);
+    for (;;) {
+        if (!intern_table[idx]) {
+            intern_table[idx] = s;
+            intern_count++;
+            break;
+        }
+        idx = (idx + 1) & (intern_cap - 1);
+    }
+    
     return s;
 }
 

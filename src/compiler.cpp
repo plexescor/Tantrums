@@ -8,6 +8,7 @@ typedef struct {
     int  length;
     int  depth;
     char type_name[32]; /* tracked type, or "" if dynamic */
+    bool is_used;       /* tracked usage for unused variable warning */
 } Local;
 
 typedef struct CompilerState {
@@ -21,6 +22,23 @@ typedef struct CompilerState {
 static CompilerState* current = nullptr;
 static bool had_type_error = false;
 static CompileMode compile_mode = MODE_BOTH;
+
+/* ── Global Tracking (for detecting duplicate definitions) ── */
+#define MAX_GLOBALS 512
+static char tracked_globals[MAX_GLOBALS][256];
+static int global_count = 0;
+
+static bool is_global_tracked(const char* name) {
+    for (int i = 0; i < global_count; i++) {
+        if (strcmp(tracked_globals[i], name) == 0) return true;
+    }
+    return false;
+}
+
+static void track_global(const char* name) {
+    if (global_count >= MAX_GLOBALS) return;
+    strncpy(tracked_globals[global_count++], name, 255);
+}
 
 /* ── Function signature table (for type checking calls) ── */
 typedef struct {
@@ -147,11 +165,27 @@ static void type_error(int line, const char* msg) {
 
 /* Check function call argument types */
 static void check_call_types(ASTNode* call_node) {
-    if (compile_mode == MODE_DYNAMIC) return; /* skip in dynamic mode */
     if (call_node->as.call.callee->type != NODE_IDENTIFIER) return;
     const char* fn_name = call_node->as.call.callee->as.identifier.name;
+    
+    /* Skip builtin validation */
+    if (strcmp(fn_name, "print") == 0 || strcmp(fn_name, "input") == 0 ||
+        strcmp(fn_name, "len") == 0 || strcmp(fn_name, "range") == 0 ||
+        strcmp(fn_name, "type") == 0 || strcmp(fn_name, "append") == 0 ||
+        strcmp(fn_name, "getCurrentTime") == 0 || strcmp(fn_name, "toSeconds") == 0 ||
+        strcmp(fn_name, "toMilliseconds") == 0 || strcmp(fn_name, "toMinutes") == 0 ||
+        strcmp(fn_name, "toHours") == 0) return;
+
     FuncSig* sig = find_func_sig(fn_name);
-    if (!sig) return;
+    if (!sig) {
+        char buf[512];
+        snprintf(buf, sizeof(buf), "Call to undefined function '%s'.", fn_name);
+        type_error(call_node->line, buf);
+        return;
+    }
+    
+    if (compile_mode == MODE_DYNAMIC) return; /* skip arity/type in dynamic mode */
+    
     if (call_node->as.call.arg_count != sig->param_count) return; /* arity checked at runtime */
     for (int i = 0; i < call_node->as.call.arg_count && i < sig->param_count; i++) {
         if (!sig->param_types[i][0]) continue; /* untyped param */
@@ -208,6 +242,10 @@ static void end_scope(int line) {
     current->scope_depth--;
     while (current->local_count > 0 &&
            current->locals[current->local_count - 1].depth > current->scope_depth) {
+        Local* local = &current->locals[current->local_count - 1];
+        if (!local->is_used && local->name[0] != '\0' && memcmp(local->name, "$", 1) != 0) {
+            fprintf(stderr, "[Line %d] Warning: Unused variable '%s'.\n", line, local->name);
+        }
         emit_byte(line, OP_POP);
         current->local_count--;
     }
@@ -224,6 +262,7 @@ static int add_local(const char* name, int len, const char* type = nullptr) {
     local->name[copy_len] = '\0';
     local->length = copy_len;
     local->depth = current->scope_depth;
+    local->is_used = false;
     if (type) { strncpy(local->type_name, type, 31); local->type_name[31] = '\0'; }
     else local->type_name[0] = '\0';
     return current->local_count++;
@@ -232,7 +271,10 @@ static int add_local(const char* name, int len, const char* type = nullptr) {
 static int resolve_local(CompilerState* state, const char* name, int len) {
     for (int i = state->local_count - 1; i >= 0; i--) {
         Local* l = &state->locals[i];
-        if (l->length == len && memcmp(l->name, name, len) == 0) return i;
+        if (l->length == len && memcmp(l->name, name, len) == 0) {
+            l->is_used = true;
+            return i;
+        }
     }
     return -1;
 }
@@ -365,6 +407,33 @@ static void compile_expr(ASTNode* node) {
     }
 }
 
+/* ── Control Flow Analysis ────────────────────────── */
+static bool has_guaranteed_return(ASTNode* node) {
+    if (!node) return false;
+    switch (node->type) {
+    case NODE_RETURN:
+    case NODE_THROW:
+        return true;
+    case NODE_BLOCK:
+        for (int i = 0; i < node->as.block.count; i++) {
+            if (has_guaranteed_return(node->as.block.nodes[i])) return true;
+        }
+        return false;
+    case NODE_IF:
+        /* Both branches must exist and guarantee return to assert the whole IF guarantees return */
+        if (node->as.if_stmt.else_b) {
+            return has_guaranteed_return(node->as.if_stmt.then_b) &&
+                   has_guaranteed_return(node->as.if_stmt.else_b);
+        }
+        return false;
+    case NODE_TRY_CATCH:
+        return has_guaranteed_return(node->as.try_catch.try_body) &&
+               has_guaranteed_return(node->as.try_catch.catch_body);
+    default:
+        return false;
+    }
+}
+
 static void compile_node(ASTNode* node) {
     if (!node) return;
     switch (node->type) {
@@ -374,25 +443,66 @@ static void compile_node(ASTNode* node) {
         break;
 
     case NODE_VAR_DECL: {
-        /* Type check: if typed and init has inferable type, verify (skip in DYNAMIC mode) */
-        if (compile_mode != MODE_DYNAMIC && node->as.var_decl.type_name && node->as.var_decl.init) {
-            const char* init_type = infer_expr_type(node->as.var_decl.init);
-            if (init_type && !types_compatible(node->as.var_decl.type_name, init_type)) {
+        /* Check for shadowing builtins */
+        if (strcmp(node->as.var_decl.name, "print") == 0 || strcmp(node->as.var_decl.name, "input") == 0 ||
+            strcmp(node->as.var_decl.name, "len") == 0 || strcmp(node->as.var_decl.name, "range") == 0 ||
+            strcmp(node->as.var_decl.name, "type") == 0 || strcmp(node->as.var_decl.name, "append") == 0 ||
+            strcmp(node->as.var_decl.name, "getCurrentTime") == 0 || strcmp(node->as.var_decl.name, "toSeconds") == 0 ||
+            strcmp(node->as.var_decl.name, "toMilliseconds") == 0 || strcmp(node->as.var_decl.name, "toMinutes") == 0 ||
+            strcmp(node->as.var_decl.name, "toHours") == 0) {
+            fprintf(stderr, "[Line %d] Warning: Variable '%s' shadows a built-in function.\n", node->line, node->as.var_decl.name);
+        }
+
+        /* Check for duplicate declarations (same scope) */
+        if (current->scope_depth == 0) {
+            if (is_global_tracked(node->as.var_decl.name)) {
                 char buf[512];
-                snprintf(buf, sizeof(buf),
-                         "Cannot assign '%s' value to '%s' variable '%s'.",
-                         init_type, node->as.var_decl.type_name, node->as.var_decl.name);
+                snprintf(buf, sizeof(buf), "Duplicate global variable declaration '%s'.", node->as.var_decl.name);
                 type_error(node->line, buf);
+            }
+        } else {
+            for (int i = current->local_count - 1; i >= 0; i--) {
+                Local* l = &current->locals[i];
+                if (l->depth < current->scope_depth) break; // Out of current scope layer
+                if (l->length == (int)strlen(node->as.var_decl.name) &&
+                    memcmp(l->name, node->as.var_decl.name, l->length) == 0) {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf), "Duplicate variable declaration '%s' in the same scope.", node->as.var_decl.name);
+                    type_error(node->line, buf);
+                }
             }
         }
 
-        if (node->as.var_decl.init)
+        /* Type check: if typed and init has inferable type, verify (skip in DYNAMIC mode) */
+        if (compile_mode != MODE_DYNAMIC && node->as.var_decl.type_name && node->as.var_decl.init) {
+            bool is_ptr = node->as.var_decl.init->type == NODE_ALLOC;
+            if (!is_ptr) {
+                const char* init_type = infer_expr_type(node->as.var_decl.init);
+                if (init_type && !types_compatible(node->as.var_decl.type_name, init_type)) {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf),
+                             "Cannot assign '%s' value to '%s' variable '%s'.",
+                             init_type, node->as.var_decl.type_name, node->as.var_decl.name);
+                    type_error(node->line, buf);
+                }
+            }
+        }
+
+        if (node->as.var_decl.init) {
             compile_expr(node->as.var_decl.init);
-        else
-            emit_byte(node->line, OP_NULL);
+        } else {
+            /* Default Initialization based on type */
+            if (node->as.var_decl.type_name && strcmp(node->as.var_decl.type_name, "list") == 0) {
+                emit_bytes(node->line, OP_LIST_NEW, 0);
+            } else if (node->as.var_decl.type_name && strcmp(node->as.var_decl.type_name, "map") == 0) {
+                emit_bytes(node->line, OP_MAP_NEW, 0);
+            } else {
+                emit_byte(node->line, OP_NULL);
+            }
+        }
 
         /* Auto-cast if type annotation present */
-        if (node->as.var_decl.type_name) {
+        if (node->as.var_decl.type_name && (!node->as.var_decl.init || node->as.var_decl.init->type != NODE_ALLOC)) {
             uint8_t cast_tag = 255;
             if (strcmp(node->as.var_decl.type_name, "int") == 0)    cast_tag = 0;
             if (strcmp(node->as.var_decl.type_name, "float") == 0)  cast_tag = 1;
@@ -406,6 +516,7 @@ static void compile_node(ASTNode* node) {
             add_local(node->as.var_decl.name, (int)strlen(node->as.var_decl.name),
                       node->as.var_decl.type_name);
         } else {
+            track_global(node->as.var_decl.name);
             ObjString* name = obj_string_new(node->as.var_decl.name, (int)strlen(node->as.var_decl.name));
             emit_bytes(node->line, OP_DEFINE_GLOBAL, make_constant(OBJ_VAL(name)));
         }
@@ -458,9 +569,19 @@ static void compile_node(ASTNode* node) {
     } break;
 
     case NODE_BLOCK:
+        if (node->as.block.count == 0 && compile_mode != MODE_DYNAMIC) { /* Optional empty block warning */
+            /* Ignore empty body warning by default to reduce noise */
+        }
         begin_scope();
-        for (int i = 0; i < node->as.block.count; i++)
+        for (int i = 0; i < node->as.block.count; i++) {
             compile_node(node->as.block.nodes[i]);
+            if (node->as.block.nodes[i]->type == NODE_RETURN || node->as.block.nodes[i]->type == NODE_THROW) {
+                if (i < node->as.block.count - 1) {
+                    fprintf(stderr, "[Line %d] Warning: Unreachable code after return/throw.\n", node->as.block.nodes[i+1]->line);
+                }
+                break;
+            }
+        }
         end_scope(node->line);
         break;
 
@@ -553,8 +674,18 @@ static void compile_node(ASTNode* node) {
 
         /* Compile body (it's a block, but don't add extra scope) */
         ASTNode* body = node->as.func_decl.body;
-        for (int i = 0; i < body->as.block.count; i++)
+        bool has_return = has_guaranteed_return(body);
+        for (int i = 0; i < body->as.block.count; i++) {
             compile_node(body->as.block.nodes[i]);
+        }
+
+        /* Verify non-void function return */
+        if (!has_return && node->as.func_decl.ret_type && 
+            strcmp(node->as.func_decl.ret_type, "null") != 0 &&
+            strcmp(node->as.func_decl.ret_type, "void") != 0) {
+            fprintf(stderr, "[Line %d] Warning: Function '%s' is typed as '%s' but may lack a return statement.\n", 
+                    node->line, node->as.func_decl.name, node->as.func_decl.ret_type);
+        }
 
         /* Implicit return null */
         emit_byte(node->line, OP_NULL);
@@ -573,6 +704,9 @@ static void compile_node(ASTNode* node) {
     } break;
 
     case NODE_RETURN: {
+        if (current->function->name == nullptr) {
+            type_error(node->line, "'return' statement used outside of a function.");
+        }
         if (node->as.child)
             compile_expr(node->as.child);
         else
@@ -581,6 +715,9 @@ static void compile_node(ASTNode* node) {
     } break;
 
     case NODE_THROW:
+        if (current->function->name == nullptr) {
+            type_error(node->line, "'throw' statement used outside of a function.");
+        }
         compile_expr(node->as.child);
         emit_byte(node->line, OP_THROW);
         break;
@@ -676,9 +813,13 @@ static void compile_node(ASTNode* node) {
 ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
     had_type_error = false;
     compile_mode = mode;
+    global_count = 0;
 
     /* Pre-scan to collect function signatures for type checking */
     prescan_signatures(program);
+    if (!find_func_sig("main")) {
+        fprintf(stderr, "Warning: NO MAIN FUNC\n");
+    }
 
     ObjFunction* fn = obj_function_new();
     fn->name = nullptr; /* script/top-level */
