@@ -40,7 +40,7 @@ struct ObjMap     { Obj obj; MapEntry* entries; int count; int capacity; };
 typedef Value (*NativeFn)(VM* vm, int arg_count, Value* args);
 struct ObjNative  { Obj obj; NativeFn function; const char* name; };
 struct ObjFunction{ Obj obj; int arity; Chunk* chunk; ObjString* name; };
-struct ObjPointer { Obj obj; Value* target; bool is_valid; };
+struct ObjPointer { Obj obj; Value* target; bool is_valid; size_t alloc_size; int alloc_line; ObjString* alloc_type; ObjString* alloc_func; int scope_depth; bool escaped; };
 
 #define IS_INT(v)      ((v).type == VAL_INT)
 #define IS_FLOAT(v)    ((v).type == VAL_FLOAT)

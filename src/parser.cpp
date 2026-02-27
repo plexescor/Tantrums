@@ -468,7 +468,8 @@ static ASTNode* statement_or_block(Parser* p) {
 
 static bool is_type_token(TokenType t) {
     return t == TOKEN_TYPE_INT || t == TOKEN_TYPE_FLOAT || t == TOKEN_TYPE_STRING ||
-           t == TOKEN_TYPE_BOOL || t == TOKEN_TYPE_LIST || t == TOKEN_TYPE_MAP;
+           t == TOKEN_TYPE_BOOL || t == TOKEN_TYPE_LIST || t == TOKEN_TYPE_MAP ||
+           t == TOKEN_VOID;
 }
 
 static ASTNode* if_statement(Parser* p) {
@@ -510,10 +511,17 @@ static ASTNode* for_statement(Parser* p) {
 static ASTNode* func_declaration(Parser* p) {
     ASTNode* n = ast_new(NODE_FUNC_DECL, previous(p)->line);
     n->as.func_decl.ret_type = nullptr;
-    /* Check for optional return type */
+    /* Check for optional return type (e.g., int foo() or int* foo()) */
     if (is_type_token(peek_tok(p)->type)) {
         Token* rt = advance_tok(p);
-        n->as.func_decl.ret_type = copy_lexeme(rt);
+        char* type_name = copy_lexeme(rt);
+        if (match(p, TOKEN_STAR)) {
+            char* ptr_type = (char*)malloc(strlen(type_name) + 2);
+            sprintf(ptr_type, "%s*", type_name);
+            free(type_name);
+            type_name = ptr_type;
+        }
+        n->as.func_decl.ret_type = type_name;
     }
     Token* name = consume(p, TOKEN_IDENTIFIER, "Expected function name.");
     n->as.func_decl.name = copy_lexeme(name);
@@ -525,10 +533,17 @@ static ASTNode* func_declaration(Parser* p) {
         do {
             ParamDef param;
             param.type_name = nullptr;
-            /* Optional type annotation */
+            /* Optional type annotation (e.g., int x or int* x) */
             if (is_type_token(peek_tok(p)->type)) {
                 Token* pt = advance_tok(p);
-                param.type_name = copy_lexeme(pt);
+                char* pt_name = copy_lexeme(pt);
+                if (match(p, TOKEN_STAR)) {
+                    char* ptr_type = (char*)malloc(strlen(pt_name) + 2);
+                    sprintf(ptr_type, "%s*", pt_name);
+                    free(pt_name);
+                    pt_name = ptr_type;
+                }
+                param.type_name = pt_name;
             }
             Token* pn = consume(p, TOKEN_IDENTIFIER, "Expected parameter name.");
             param.name = copy_lexeme(pn);
@@ -650,12 +665,18 @@ static ASTNode* declaration(Parser* p) {
         }
         if (name_idx < p->tokens->count && p->tokens->tokens[name_idx].type == TOKEN_IDENTIFIER) {
             Token* type = advance_tok(p);
-            if (is_pointer) advance_tok(p); /* Skip the * token */
+            char* type_name = copy_lexeme(type);
+            if (is_pointer) {
+                advance_tok(p); /* Skip the * token */
+                char* ptr_type = (char*)malloc(strlen(type_name) + 2);
+                sprintf(ptr_type, "%s*", type_name);
+                free(type_name);
+                type_name = ptr_type;
+            }
             Token* name = advance_tok(p);
             
             ASTNode* n = ast_new(NODE_VAR_DECL, type->line);
-            n->as.var_decl.type_name = copy_lexeme(type);
-            /* Mark pointer type internally (can append '*' or flag, but keeping syntax simple for now) */
+            n->as.var_decl.type_name = type_name;
             n->as.var_decl.name = copy_lexeme(name);
             n->as.var_decl.init = nullptr;
             

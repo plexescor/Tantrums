@@ -208,6 +208,12 @@ ObjPointer* obj_pointer_new(Value* target) {
     ObjPointer* p = (ObjPointer*)allocate_obj(sizeof(ObjPointer), OBJ_POINTER);
     p->target = target;
     p->is_valid = true;
+    p->alloc_size = 0;
+    p->alloc_line = 0;
+    p->alloc_type = nullptr;
+    p->alloc_func = nullptr;
+    p->scope_depth = 0;
+    p->escaped = false;
     return p;
 }
 

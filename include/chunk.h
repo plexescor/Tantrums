@@ -48,6 +48,8 @@ typedef enum {
     OP_TRY_BEGIN,   /* operand: uint16 offset to catch block */
     OP_TRY_END,     /* pop exception handler, jump past catch */
     OP_CLONE,
+    OP_ENTER_SCOPE,
+    OP_EXIT_SCOPE,
     OP_HALT,
 } OpCode;
 

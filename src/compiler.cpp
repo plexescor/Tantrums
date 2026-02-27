@@ -9,6 +9,8 @@ typedef struct {
     int  depth;
     char type_name[32]; /* tracked type, or "" if dynamic */
     bool is_used;       /* tracked usage for unused variable warning */
+    bool holds_alloc;   /* tracked pointer allocations for leak errors */
+    bool auto_free;     /* naturally local pointer safely auto-freed at end_scope */
 } Local;
 
 typedef struct CompilerState {
@@ -17,11 +19,16 @@ typedef struct CompilerState {
     Local  locals[MAX_LOCALS];
     int    local_count;
     int    scope_depth;
+    char   ret_type[32]; /* current function's return type */
 } CompilerState;
 
 static CompilerState* current = nullptr;
 static bool had_type_error = false;
 static CompileMode compile_mode = MODE_BOTH;
+static bool is_in_expr_stmt = false; /* tracking if current expression is a top-level statement */
+extern bool suppress_autofree_notes;
+
+static void type_error(int line, const char* msg);
 
 typedef struct Loop {
     struct Loop* enclosing;
@@ -95,6 +102,12 @@ static void prescan_signatures(ASTNode* program) {
     for (int i = 0; i < program->as.program.count; i++) {
         ASTNode* n = program->as.program.nodes[i];
         if (n->type == NODE_FUNC_DECL) {
+            /* RULE 1: Every function must declare a return type in static mode (except main) */
+            if (compile_mode == MODE_STATIC && !n->as.func_decl.ret_type && strcmp(n->as.func_decl.name, "main") != 0) {
+                char buf[512];
+                snprintf(buf, sizeof(buf), "function '%s' in static mode must declare a return type.", n->as.func_decl.name);
+                type_error(n->line, buf);
+            }
             /* Check for duplicate function names */
             if (find_func_sig(n->as.func_decl.name)) {
                 fprintf(stderr, "[Line %d] Error: Duplicate function '%s'.\n",
@@ -163,11 +176,18 @@ static const char* infer_expr_type(ASTNode* node) {
     }
 }
 
+static bool is_pointer_type(const char* type) {
+    if (!type) return false;
+    return strchr(type, '*') != nullptr;
+}
+
 static bool types_compatible(const char* expected, const char* actual) {
     if (!expected || !expected[0] || !actual) return true; /* dynamic = always OK */
     if (strcmp(expected, actual) == 0) return true;
     /* int and float are promotable */
     if (strcmp(expected, "float") == 0 && strcmp(actual, "int") == 0) return true;
+    /* null is compatible with any pointer or dynamic */
+    if (strcmp(actual, "null") == 0 && (is_pointer_type(expected) || !expected[0])) return true;
     return false;
 }
 
@@ -176,21 +196,26 @@ static void type_error(int line, const char* msg) {
     had_type_error = true;
 }
 
+/* Check if function is a builtin */
+static bool is_builtin(const char* fn_name) {
+    return strcmp(fn_name, "print") == 0 || strcmp(fn_name, "input") == 0 ||
+           strcmp(fn_name, "len") == 0 || strcmp(fn_name, "range") == 0 ||
+           strcmp(fn_name, "type") == 0 || strcmp(fn_name, "append") == 0 ||
+           strcmp(fn_name, "getCurrentTime") == 0 || strcmp(fn_name, "toSeconds") == 0 ||
+           strcmp(fn_name, "toMilliseconds") == 0 || strcmp(fn_name, "toMinutes") == 0 ||
+           strcmp(fn_name, "toHours") == 0 ||
+           strcmp(fn_name, "getProcessMemory") == 0 || strcmp(fn_name, "getVmMemory") == 0 ||
+           strcmp(fn_name, "getVmPeakMemory") == 0 || strcmp(fn_name, "bytesToKB") == 0 ||
+           strcmp(fn_name, "bytesToMB") == 0 || strcmp(fn_name, "bytesToGB") == 0;
+}
+
 /* Check function call argument types */
 static void check_call_types(ASTNode* call_node) {
     if (call_node->as.call.callee->type != NODE_IDENTIFIER) return;
     const char* fn_name = call_node->as.call.callee->as.identifier.name;
     
     /* Skip builtin validation */
-    if (strcmp(fn_name, "print") == 0 || strcmp(fn_name, "input") == 0 ||
-    strcmp(fn_name, "len") == 0 || strcmp(fn_name, "range") == 0 ||
-    strcmp(fn_name, "type") == 0 || strcmp(fn_name, "append") == 0 ||
-    strcmp(fn_name, "getCurrentTime") == 0 || strcmp(fn_name, "toSeconds") == 0 ||
-    strcmp(fn_name, "toMilliseconds") == 0 || strcmp(fn_name, "toMinutes") == 0 ||
-    strcmp(fn_name, "toHours") == 0 ||
-    strcmp(fn_name, "getProcessMemory") == 0 || strcmp(fn_name, "getVmMemory") == 0 ||
-    strcmp(fn_name, "getVmPeakMemory") == 0 || strcmp(fn_name, "bytesToKB") == 0 ||
-    strcmp(fn_name, "bytesToMB") == 0 || strcmp(fn_name, "bytesToGB") == 0) return;
+    if (is_builtin(fn_name)) return;
 
     FuncSig* sig = find_func_sig(fn_name);
     if (!sig) {
@@ -253,16 +278,34 @@ static void emit_constant(int line, Value val) {
 }
 
 /* ── Scope management ─────────────────────────────── */
-static void begin_scope()  { current->scope_depth++; }
+static void begin_scope()  { 
+    current->scope_depth++;
+    /* We don't have a reliable line number in begin_scope, use 0 */
+    emit_byte(0, OP_ENTER_SCOPE);
+}
 static void end_scope(int line) {
     current->scope_depth--;
     while (current->local_count > 0 &&
            current->locals[current->local_count - 1].depth > current->scope_depth) {
         Local* local = &current->locals[current->local_count - 1];
-        
+
         bool is_param = (local->depth == 1 && current->function->name != nullptr);
         bool is_in_loop = (local->depth >= 2);
         bool is_hidden = (local->name[0] == '\0' || memcmp(local->name, "$", 1) == 0);
+
+        if (local->holds_alloc && !is_hidden) {
+            char buf[512];
+            snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' goes out of scope without being freed.", local->name);
+            type_error(line, buf);
+        }
+
+        if (local->auto_free) {
+            if (!suppress_autofree_notes) {
+                printf("[Tantrums] note: auto-freed '%s' at line %d (provably local)\n", local->name, line);
+            }
+            emit_bytes(line, OP_GET_LOCAL, (uint8_t)(current->local_count - 1));
+            emit_byte(line, OP_FREE);
+        }
 
         if (!local->is_used && current->function->name != nullptr && !is_hidden && !is_param && !is_in_loop) {
             fprintf(stderr, "[Line %d] Warning: Unused variable '%s'.\n", line, local->name);
@@ -270,6 +313,9 @@ static void end_scope(int line) {
         emit_byte(line, OP_POP);
         current->local_count--;
     }
+    /* OP_EXIT_SCOPE goes AFTER all auto-frees and pops, so Layer 2 only
+       sees pointers that were NOT already freed by compile-time bytecode. */
+    emit_byte(line, OP_EXIT_SCOPE);
 }
 
 static int add_local(const char* name, int len, const char* type = nullptr) {
@@ -284,6 +330,8 @@ static int add_local(const char* name, int len, const char* type = nullptr) {
     local->length = copy_len;
     local->depth = current->scope_depth;
     local->is_used = false;
+    local->holds_alloc = false;
+    local->auto_free = false;
     if (type) { strncpy(local->type_name, type, 31); local->type_name[31] = '\0'; }
     else local->type_name[0] = '\0';
     return current->local_count++;
@@ -391,9 +439,38 @@ static void compile_expr(ASTNode* node) {
 
     case NODE_CALL: {
         check_call_types(node); /* compile-time type check */
+        
+        /* RULE 6: void functions cannot be used in expressions in static mode */
+        const char* rt = infer_expr_type(node);
+        if (compile_mode == MODE_STATIC && rt && strcmp(rt, "void") == 0 && !is_in_expr_stmt) {
+            char buf[512];
+            if (node->as.call.callee->type == NODE_IDENTIFIER) {
+                snprintf(buf, sizeof(buf), "'%s' is void and cannot be used in an expression.", 
+                         node->as.call.callee->as.identifier.name);
+            } else {
+                snprintf(buf, sizeof(buf), "void function call cannot be used in an expression.");
+            }
+            type_error(node->line, buf);
+        }
+
+        bool old_expr_stmt = is_in_expr_stmt;
+        is_in_expr_stmt = false; // Arguments/callee are not in expr stmt context
         compile_expr(node->as.call.callee);
-        for (int i = 0; i < node->as.call.arg_count; i++)
+        
+        bool is_user_func = false;
+        if (node->as.call.callee->type == NODE_IDENTIFIER && !is_builtin(node->as.call.callee->as.identifier.name)) {
+            is_user_func = true;
+        }
+
+        for (int i = 0; i < node->as.call.arg_count; i++) {
+            if (is_user_func && node->as.call.args[i]->type == NODE_IDENTIFIER) {
+                int slot = resolve_local(current, node->as.call.args[i]->as.identifier.name, node->as.call.args[i]->as.identifier.length);
+                if (slot != -1) current->locals[slot].holds_alloc = false;
+            }
             compile_expr(node->as.call.args[i]);
+        }
+        is_in_expr_stmt = old_expr_stmt;
+
         emit_bytes(node->line, OP_CALL, (uint8_t)node->as.call.arg_count);
     } break;
 
@@ -417,10 +494,14 @@ static void compile_expr(ASTNode* node) {
         emit_byte(node->line, OP_INDEX_GET);
         break;
 
-    case NODE_ALLOC:
+    case NODE_ALLOC: {
         compile_expr(node->as.alloc_expr.init);
         emit_byte(node->line, OP_ALLOC);
+        const char* type_name = node->as.alloc_expr.type_name ? node->as.alloc_expr.type_name : "dynamic";
+        ObjString* type_str = obj_string_new(type_name, (int)strlen(type_name));
+        emit_byte(node->line, make_constant(OBJ_VAL(type_str)));
         break;
+    }
 
     case NODE_POSTFIX: {
         bool is_inc = node->as.postfix.op == TOKEN_PLUS_PLUS;
@@ -479,6 +560,27 @@ static void compile_expr(ASTNode* node) {
         }
         compile_expr(node->as.assign.value);
         int slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
+        
+        if (slot != -1) {
+            if (current->locals[slot].holds_alloc) {
+                char buf[512];
+                snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' reassigned without being freed.", node->as.assign.name);
+                type_error(node->line, buf);
+            }
+            if (node->as.assign.value && node->as.assign.value->type == NODE_ALLOC) {
+                current->locals[slot].holds_alloc = true;
+            } else if (node->as.assign.value && node->as.assign.value->type == NODE_CALL && node->as.assign.value->as.call.callee->type == NODE_IDENTIFIER) {
+                FuncSig* sig = find_func_sig(node->as.assign.value->as.call.callee->as.identifier.name);
+                if (sig && is_pointer_type(sig->ret_type)) {
+                    current->locals[slot].holds_alloc = true;
+                } else {
+                    current->locals[slot].holds_alloc = false;
+                }
+            } else {
+                current->locals[slot].holds_alloc = false;
+            }
+        }
+        
         if (slot != -1) {
             /* Reassign existing local — set, leaves copy on stack */
             emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
@@ -540,13 +642,203 @@ static bool has_guaranteed_return(ASTNode* node) {
     }
 }
 
+static bool has_any_return(ASTNode* node) {
+    if (!node) return false;
+    switch (node->type) {
+    case NODE_RETURN:
+        return true;
+    case NODE_BLOCK:
+        for (int i = 0; i < node->as.block.count; i++) {
+            if (has_any_return(node->as.block.nodes[i])) return true;
+        }
+        return false;
+    case NODE_IF:
+        return has_any_return(node->as.if_stmt.then_b) ||
+               (node->as.if_stmt.else_b && has_any_return(node->as.if_stmt.else_b));
+    case NODE_TRY_CATCH:
+        return has_any_return(node->as.try_catch.try_body) ||
+               has_any_return(node->as.try_catch.catch_body);
+    default:
+        return false;
+    }
+}
+
+/* ── Escape Analysis (Layer 1) ────────────────────── */
+typedef struct {
+    bool escaped;
+    bool has_manual_free;
+    int  use_count;
+    bool only_simple_assign;
+} EscapeResult;
+
+static void analyze_escape(ASTNode* node, const char* target_name, int loop_depth, EscapeResult* result) {
+    if (!node || result->escaped) return;
+
+    switch (node->type) {
+    case NODE_IDENTIFIER: {
+        if (strcmp(node->as.identifier.name, target_name) == 0) {
+            result->use_count++;
+            /* Condition 6: Conditional escape */
+            if (loop_depth > 0) result->escaped = true;
+            /* Condition 7: Expression escape (if we reach here, it's not a direct LHS of standalone assign) */
+            else result->escaped = true;
+        }
+        break;
+    }
+    case NODE_RETURN: {
+        /* Condition 1: Return escape */
+        EscapeResult ret_check = {false, false, 0, true};
+        analyze_escape(node->as.child, target_name, loop_depth, &ret_check);
+        if (ret_check.use_count > 0) result->escaped = true;
+        break;
+    }
+    case NODE_EXPR_STMT: {
+        /* Check if this is a lone deref assignment `*p = value;` */
+        if (node->as.child && node->as.child->type == NODE_INDEX_ASSIGN) {
+            ASTNode* assign = node->as.child;
+            if (assign->as.index_assign.index == nullptr && /* pointer deref */
+                assign->as.index_assign.object->type == NODE_IDENTIFIER &&
+                strcmp(assign->as.index_assign.object->as.identifier.name, target_name) == 0) {
+                
+                result->use_count++;
+                if (loop_depth > 0) result->escaped = true;
+                
+                /* Analyze the RHS value normally */
+                analyze_escape(assign->as.index_assign.value, target_name, loop_depth, result);
+                return; /* Don't traverse object (would trigger condition 7) */
+            }
+        }
+        analyze_escape(node->as.child, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_CALL: {
+        /* Condition 2: Function call escape */
+        for (int i = 0; i < node->as.call.arg_count; i++) {
+            EscapeResult arg_check = {false, false, 0, true};
+            analyze_escape(node->as.call.args[i], target_name, loop_depth, &arg_check);
+            if (arg_check.use_count > 0) result->escaped = true;
+        }
+        analyze_escape(node->as.call.callee, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_ASSIGN:
+    case NODE_VAR_DECL: {
+        /* Condition 3/5: Alias / Global escape */
+        ASTNode* rhs = (node->type == NODE_ASSIGN) ? node->as.assign.value : node->as.var_decl.init;
+        EscapeResult rhs_check = {false, false, 0, true};
+        analyze_escape(rhs, target_name, loop_depth, &rhs_check);
+        if (rhs_check.use_count > 0) result->escaped = true;
+        break;
+    }
+    case NODE_INDEX_ASSIGN: {
+        /* Condition 4: Map/List escape */
+        EscapeResult val_check = {false, false, 0, true};
+        analyze_escape(node->as.index_assign.value, target_name, loop_depth, &val_check);
+        if (val_check.use_count > 0) result->escaped = true;
+        
+        analyze_escape(node->as.index_assign.object, target_name, loop_depth, result);
+        if (node->as.index_assign.index) analyze_escape(node->as.index_assign.index, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_FREE: {
+        if (node->as.child && node->as.child->type == NODE_IDENTIFIER) {
+            if (strcmp(node->as.child->as.identifier.name, target_name) == 0) {
+                if (loop_depth > 0) result->escaped = true; /* Ambigous manual free */
+                else {
+                    result->use_count++;
+                    result->has_manual_free = true;
+                }
+                return;
+            }
+        }
+        analyze_escape(node->as.child, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_BLOCK: {
+        for (int i = 0; i < node->as.block.count; i++) {
+            analyze_escape(node->as.block.nodes[i], target_name, loop_depth, result);
+        }
+        break;
+    }
+    case NODE_IF: {
+        analyze_escape(node->as.if_stmt.cond, target_name, loop_depth, result);
+        analyze_escape(node->as.if_stmt.then_b, target_name, loop_depth + 1, result);
+        if (node->as.if_stmt.else_b) analyze_escape(node->as.if_stmt.else_b, target_name, loop_depth + 1, result);
+        break;
+    }
+    case NODE_WHILE: {
+        analyze_escape(node->as.while_stmt.cond, target_name, loop_depth, result);
+        analyze_escape(node->as.while_stmt.body, target_name, loop_depth + 1, result);
+        break;
+    }
+    case NODE_FOR_IN: {
+        analyze_escape(node->as.for_in.iterable, target_name, loop_depth, result);
+        analyze_escape(node->as.for_in.body, target_name, loop_depth + 1, result);
+        break;
+    }
+    case NODE_BINARY:
+        analyze_escape(node->as.binary.left, target_name, loop_depth, result);
+        analyze_escape(node->as.binary.right, target_name, loop_depth, result);
+        break;
+    case NODE_UNARY:
+        /* TOKEN_STAR is a pointer dereference (*p) — reading through p, not escaping it.
+           Do NOT recurse into the operand in this case; p stays local. */
+        if (node->as.unary.op != TOKEN_STAR) {
+            analyze_escape(node->as.unary.operand, target_name, loop_depth, result);
+        }
+        break;
+    case NODE_INDEX:
+        analyze_escape(node->as.index_access.object, target_name, loop_depth, result);
+        analyze_escape(node->as.index_access.index, target_name, loop_depth, result);
+        break;
+    case NODE_POSTFIX:
+        analyze_escape(node->as.postfix.operand, target_name, loop_depth, result);
+        break;
+    case NODE_ALLOC:
+        analyze_escape(node->as.alloc_expr.init, target_name, loop_depth, result);
+        break;
+    case NODE_LIST_LIT:
+        for (int i = 0; i < node->as.list_literal.count; i++) analyze_escape(node->as.list_literal.nodes[i], target_name, loop_depth, result);
+        break;
+    case NODE_MAP_LIT:
+        for (int i = 0; i < node->as.map_literal.count; i++) {
+            analyze_escape(node->as.map_literal.keys[i], target_name, loop_depth, result);
+            analyze_escape(node->as.map_literal.values[i], target_name, loop_depth, result);
+        }
+        break;
+    case NODE_TRY_CATCH:
+        analyze_escape(node->as.try_catch.try_body, target_name, loop_depth + 1, result);
+        analyze_escape(node->as.try_catch.catch_body, target_name, loop_depth + 1, result);
+        break;
+    default:
+        break;
+    }
+    
+    /* Condition 8: Multiple usages (excluding direct reassignments of the pointer itself which is caught layer) */
+    if (result->use_count > (result->has_manual_free ? 2 : 1)) {
+        result->escaped = true;
+    }
+}
+
 static void compile_node(ASTNode* node) {
     if (!node) return;
     switch (node->type) {
-    case NODE_EXPR_STMT:
+    case NODE_EXPR_STMT: {
+        /* RULE 6: Warn if a pointer return value is discarded */
+        if (node->as.child && node->as.child->type == NODE_CALL && node->as.child->as.call.callee->type == NODE_IDENTIFIER) {
+            FuncSig* sig = find_func_sig(node->as.child->as.call.callee->as.identifier.name);
+            if (sig && is_pointer_type(sig->ret_type)) {
+                fprintf(stderr, "[Tantrums Warning] line %d: pointer return value discarded — potential leak.\n", node->line);
+            }
+        }
+        
+        bool old = is_in_expr_stmt;
+        is_in_expr_stmt = true;
         compile_expr(node->as.child);
+        is_in_expr_stmt = old;
         emit_byte(node->line, OP_POP);
         break;
+    }
 
     case NODE_VAR_DECL: {
         /* Check for shadowing builtins */
@@ -632,8 +924,18 @@ static void compile_node(ASTNode* node) {
         }
 
         if (current->scope_depth > 0) {
-            add_local(node->as.var_decl.name, (int)strlen(node->as.var_decl.name),
-                      node->as.var_decl.type_name);
+            int slot = add_local(node->as.var_decl.name, (int)strlen(node->as.var_decl.name),
+                                 node->as.var_decl.type_name);
+            if (slot != -1 && node->as.var_decl.init) {
+                if (node->as.var_decl.init->type == NODE_ALLOC) {
+                    current->locals[slot].holds_alloc = true;
+                } else if (node->as.var_decl.init->type == NODE_CALL && node->as.var_decl.init->as.call.callee->type == NODE_IDENTIFIER) {
+                    FuncSig* sig = find_func_sig(node->as.var_decl.init->as.call.callee->as.identifier.name);
+                    if (sig && is_pointer_type(sig->ret_type)) {
+                        current->locals[slot].holds_alloc = true;
+                    }
+                }
+            }
         } else {
             track_global(node->as.var_decl.name);
             ObjString* name = obj_string_new(node->as.var_decl.name, (int)strlen(node->as.var_decl.name));
@@ -643,12 +945,42 @@ static void compile_node(ASTNode* node) {
 
 
     case NODE_BLOCK:
-        if (node->as.block.count == 0 && compile_mode != MODE_DYNAMIC) { /* Optional empty block warning */
+        if (node->as.block.count == 0 && compile_mode != MODE_DYNAMIC) { /* Optional empty block  */
             /* Ignore empty body warning by default to reduce noise */
         }
         begin_scope();
         for (int i = 0; i < node->as.block.count; i++) {
+
             compile_node(node->as.block.nodes[i]);
+
+            /* If this was a var_decl that initialized a pointer, NOW the slot exists —
+               run escape analysis on the remaining nodes and update holds_alloc / auto_free */
+            if (node->as.block.nodes[i]->type == NODE_VAR_DECL &&
+                node->as.block.nodes[i]->as.var_decl.init &&
+                node->as.block.nodes[i]->as.var_decl.init->type == NODE_ALLOC) {
+
+                const char* target_name = node->as.block.nodes[i]->as.var_decl.name;
+                int slot = resolve_local(current, target_name, (int)strlen(target_name));
+                if (slot != -1) {
+                    EscapeResult er = {false, false, 0, true};
+                    for (int j = i + 1; j < node->as.block.count; j++) {
+                        analyze_escape(node->as.block.nodes[j], target_name, 0, &er);
+                        if (er.escaped) break;
+                    }
+
+                    if (er.escaped) {
+                        current->locals[slot].holds_alloc = false; /* Priority 1/4 — escaped, trust developer */
+                    } else if (er.has_manual_free) {
+                        current->locals[slot].holds_alloc = false; /* Priority 2 — developer freed it manually */
+                    } else if (er.use_count == 1) {
+                        current->locals[slot].auto_free = true;    /* Priority 3 — provably local, insert auto-free */
+                        current->locals[slot].holds_alloc = false;
+                    } else {
+                        current->locals[slot].holds_alloc = false; /* Ambiguous — do not error, let Layer 2 handle it */
+                    }
+                }
+            }
+
             if (node->as.block.nodes[i]->type == NODE_RETURN || node->as.block.nodes[i]->type == NODE_THROW) {
                 if (i < node->as.block.count - 1) {
                     fprintf(stderr, "[Line %d] Warning: Unreachable code after return/throw.\n", node->as.block.nodes[i+1]->line);
@@ -663,11 +995,26 @@ static void compile_node(ASTNode* node) {
         compile_expr(node->as.if_stmt.cond);
         int then_jump = emit_jump(node->line, OP_JUMP_IF_FALSE);
         emit_byte(node->line, OP_POP); /* pop condition */
-        compile_node(node->as.if_stmt.then_b);
+        /* Compile then-body statements directly — do NOT emit OP_ENTER_SCOPE/OP_EXIT_SCOPE
+           for if/else bodies. Jumps can skip OP_ENTER_SCOPE but not its matching
+           OP_EXIT_SCOPE (or vice versa), which corrupts vm->scope_depth permanently. */
+        if (node->as.if_stmt.then_b && node->as.if_stmt.then_b->type == NODE_BLOCK) {
+            for (int i = 0; i < node->as.if_stmt.then_b->as.block.count; i++)
+                compile_node(node->as.if_stmt.then_b->as.block.nodes[i]);
+        } else {
+            compile_node(node->as.if_stmt.then_b);
+        }
         int else_jump = emit_jump(node->line, OP_JUMP);
         patch_jump(then_jump);
         emit_byte(node->line, OP_POP);
-        if (node->as.if_stmt.else_b) compile_node(node->as.if_stmt.else_b);
+        if (node->as.if_stmt.else_b) {
+            if (node->as.if_stmt.else_b->type == NODE_BLOCK) {
+                for (int i = 0; i < node->as.if_stmt.else_b->as.block.count; i++)
+                    compile_node(node->as.if_stmt.else_b->as.block.nodes[i]);
+            } else {
+                compile_node(node->as.if_stmt.else_b);
+            }
+        }
         patch_jump(else_jump);
     } break;
 
@@ -768,6 +1115,12 @@ static void compile_node(ASTNode* node) {
         comp.function = fn;
         comp.enclosing = current;
         comp.scope_depth = 1;
+        if (node->as.func_decl.ret_type) {
+            strncpy(comp.ret_type, node->as.func_decl.ret_type, 31);
+            comp.ret_type[31] = '\0';
+        } else {
+            comp.ret_type[0] = '\0';
+        }
         current = &comp;
 
         /* Reserve slot 0 for the function itself */
@@ -776,7 +1129,8 @@ static void compile_node(ASTNode* node) {
         /* Parameters as locals */
         for (int i = 0; i < node->as.func_decl.param_count; i++) {
             add_local(node->as.func_decl.params[i].name,
-                      (int)strlen(node->as.func_decl.params[i].name));
+                      (int)strlen(node->as.func_decl.params[i].name),
+                      node->as.func_decl.params[i].type_name);
         }
 
         /* Compile body (it's a block, but don't add extra scope) */
@@ -784,8 +1138,22 @@ static void compile_node(ASTNode* node) {
         bool has_return = has_guaranteed_return(body);
         compile_node(body);
 
-        /* Verify non-void function return */
-        if (!has_return && node->as.func_decl.ret_type && 
+        /* RULE 3 & 4: non-void functions must return the declared type on all paths in static mode */
+        if (compile_mode == MODE_STATIC && comp.ret_type[0] && strcmp(comp.ret_type, "void") != 0) {
+            if (!has_return) {
+                char buf[512];
+                if (strstr(body->as.block.nodes[body->as.block.count-1]->type == NODE_IF ? "" : "", "")) {} // dummy
+                /* We need to distinguish between "no return at all" and "not all paths" */
+                if (!has_any_return(body)) {
+                    snprintf(buf, sizeof(buf), "function '%s' declared '%s' but has no return statement.", 
+                             node->as.func_decl.name, comp.ret_type);
+                } else {
+                    snprintf(buf, sizeof(buf), "function '%s' not all code paths return a value.", 
+                             node->as.func_decl.name);
+                }
+                type_error(node->line, buf);
+            }
+        } else if (!has_return && node->as.func_decl.ret_type && 
             strcmp(node->as.func_decl.ret_type, "null") != 0 &&
             strcmp(node->as.func_decl.ret_type, "void") != 0) {
             fprintf(stderr, "[Line %d] Warning: Function '%s' is typed as '%s' but may lack a return statement.\n", 
@@ -812,10 +1180,72 @@ static void compile_node(ASTNode* node) {
         if (current->function->name == nullptr) {
             type_error(node->line, "'return' statement used outside of a function.");
         }
-        if (node->as.child)
+
+        /* Escape Analysis: identify if returning a local pointing to an allocation */
+        int return_slot = -1;
+        if (node->as.child && node->as.child->type == NODE_IDENTIFIER) {
+            return_slot = resolve_local(current, node->as.child->as.identifier.name, node->as.child->as.identifier.length);
+            /* If the function returns a pointer type, the allocation escapes. */
+            if (return_slot != -1 && is_pointer_type(current->ret_type)) {
+                current->locals[return_slot].holds_alloc = false;
+            }
+        }
+
+        /* RULE 2: void functions must not return a value */
+        if (strcmp(current->ret_type, "void") == 0) {
+            if (node->as.child) {
+                char buf[512];
+                snprintf(buf, sizeof(buf), "void function '%s' must not return a value.", (const char*)current->function->name->chars);
+                type_error(node->line, buf);
+            }
+        } else if (current->ret_type[0]) {
+            const char* actual = infer_expr_type(node->as.child);
+            
+            if (is_pointer_type(current->ret_type)) {
+                if (!is_pointer_type(actual) && strcmp(actual, "null") != 0) {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf), "function '%s' declared '%s' but returns non-pointer.", 
+                             (const char*)current->function->name->chars, current->ret_type);
+                    type_error(node->line, buf);
+                }
+            } else if (is_pointer_type(actual)) {
+                /* Returning pointer from non-pointer return type -> Warning */
+                fprintf(stderr, "[Tantrums Warning] line %d: returning pointer from non-pointer return type — caller cannot free this pointer\n", node->line);
+            } else if (compile_mode == MODE_STATIC) {
+                /* Normal type check in static mode */
+                if (!types_compatible(current->ret_type, actual)) {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf), "return type mismatch in '%s': expected '%s' got '%s'.", 
+                             (const char*)current->function->name->chars, current->ret_type, actual ? actual : "dynamic");
+                    type_error(node->line, buf);
+                }
+            }
+        }
+
+        if (node->as.child) {
             compile_expr(node->as.child);
-        else
+        } else {
             emit_byte(node->line, OP_NULL);
+        }
+        
+        for (int i = 0; i < current->local_count; i++) {
+            if (current->locals[i].holds_alloc) {
+                /* Check if this pointer escapes via the return expression before erroring */
+                if (node->as.child) {
+                    EscapeResult er = {false, false, 0, true};
+                    analyze_escape(node->as.child, current->locals[i].name, 0, &er);
+                    if (er.use_count > 0) {
+                        current->locals[i].holds_alloc = false;
+                        continue;
+                    }
+                }
+                char buf[512];
+                snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' goes out of scope without being freed.", current->locals[i].name);
+                type_error(node->line, buf);
+                current->locals[i].holds_alloc = false;
+            }
+        }
+        
         emit_byte(node->line, OP_RETURN);
     } break;
 
@@ -828,6 +1258,12 @@ static void compile_node(ASTNode* node) {
         break;
 
     case NODE_FREE:
+        if (node->as.child->type == NODE_IDENTIFIER) {
+            int slot = resolve_local(current, node->as.child->as.identifier.name, node->as.child->as.identifier.length);
+            if (slot != -1) {
+                current->locals[slot].holds_alloc = false;
+            }
+        }
         compile_expr(node->as.child);
         emit_byte(node->line, OP_FREE);
         break;
@@ -944,7 +1380,7 @@ ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
     /* Pre-scan to collect function signatures for type checking */
     prescan_signatures(program);
     if (!find_func_sig("main")) {
-        fprintf(stderr, "Warning: NO MAIN FUNC\n");
+        fprintf(stderr, "Warning: NO MAIN FUNCTION\n");
     }
 
     ObjFunction* fn = obj_function_new();

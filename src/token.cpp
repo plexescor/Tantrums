@@ -73,6 +73,7 @@ const char* token_type_name(TokenType type) {
         case TOKEN_TYPE_BOOL:     return "bool";
         case TOKEN_TYPE_LIST:     return "list";
         case TOKEN_TYPE_MAP:      return "map";
+        case TOKEN_VOID:          return "void";
         case TOKEN_EOF:           return "EOF";
         case TOKEN_ERROR:         return "ERROR";
     }

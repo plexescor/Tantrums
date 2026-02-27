@@ -16,6 +16,7 @@ void vm_init(VM* vm) {
     vm->frame_count = 0;
     vm->handler_count = 0;
     vm->objects = nullptr;
+    vm->scope_depth = 0;
     table_init(&vm->globals);
     builtins_register(vm);
 }
@@ -261,7 +262,20 @@ static InterpretResult run(VM* vm) {
         case OP_POP: vm_pop(vm); break;
 
         case OP_GET_LOCAL:  { uint8_t slot = READ_BYTE(); vm_push(vm, frame->slots[slot]); } break;
-        case OP_SET_LOCAL:  { uint8_t slot = READ_BYTE(); frame->slots[slot] = vm_peek(vm, 0); } break;
+        case OP_SET_LOCAL:  { 
+            uint8_t slot = READ_BYTE(); 
+            Value val = vm_peek(vm, 0);
+            /* Layer 2 runtime escape: check if assigned to variable outside current scope */
+            if (IS_POINTER(val)) {
+                if (vm->scope_depth > 0 && vm->scope_base_slots[vm->scope_depth]) {
+                    Value* slot_ptr = &frame->slots[slot];
+                    if (slot_ptr < vm->scope_base_slots[vm->scope_depth]) {
+                        AS_POINTER(val)->escaped = true;
+                    }
+                }
+            }
+            frame->slots[slot] = val; 
+        } break;
         case OP_GET_GLOBAL: {
             ObjString* name = AS_STRING(READ_CONSTANT());
             Value val;
@@ -298,15 +312,24 @@ static InterpretResult run(VM* vm) {
 
         case OP_CALL: {
             int argc = READ_BYTE();
+            for (int i = 0; i < argc; i++) {
+                Value arg = vm_peek(vm, i);
+                if (IS_POINTER(arg)) AS_POINTER(arg)->escaped = true;
+            }
             if (!call_value(vm, vm_peek(vm, argc), argc)) return INTERPRET_RUNTIME_ERROR;
+            /* Save caller's scope_depth in the new frame so we can restore on return */
+            vm->frames[vm->frame_count - 1].saved_scope_depth = vm->scope_depth;
             frame = &vm->frames[vm->frame_count - 1];
         } break;
 
         case OP_RETURN: {
             Value result = vm_pop(vm);
+            if (IS_POINTER(result)) AS_POINTER(result)->escaped = true;
+            int restore_depth = frame->saved_scope_depth;
             vm->frame_count--;
             if (vm->frame_count == 0) { vm_pop(vm); return INTERPRET_OK; }
             vm->stack_top = frame->slots;
+            vm->scope_depth = restore_depth; /* restore caller's scope depth */
             vm_push(vm, result);
             frame = &vm->frames[vm->frame_count - 1];
         } break;
@@ -383,6 +406,7 @@ static InterpretResult run(VM* vm) {
             Value val = vm_peek(vm, 0);
             Value idx = vm_peek(vm, 1);
             Value obj = vm_peek(vm, 2);
+            if (IS_POINTER(val)) AS_POINTER(val)->escaped = true;
             if (IS_LIST(obj) && IS_INT(idx)) {
                 ObjList* l = AS_LIST(obj);
                 int i = (int)AS_INT(idx);
@@ -404,6 +428,37 @@ static InterpretResult run(VM* vm) {
             else vm_push(vm, INT_VAL(0));
         } break;
 
+        case OP_ENTER_SCOPE: {
+            if (vm->scope_depth < MAX_LOCAL_SCOPES) {
+                vm->scope_base_slots[vm->scope_depth] = vm->stack_top;
+            }
+            vm->scope_depth++;
+        } break;
+
+        case OP_EXIT_SCOPE: {
+            if (vm->scope_depth > 0) {
+                vm->scope_depth--;
+                /* Scan all live pointers: if allocated in this scope and not escaped, free it */
+                extern Obj* all_objects;
+                Obj* o = all_objects;
+                while (o) {
+                    if (o->type == OBJ_POINTER) {
+                        ObjPointer* p = (ObjPointer*)o;
+                        if (p->is_valid && p->target && !p->escaped && p->scope_depth > vm->scope_depth) {
+                            extern bool suppress_autofree_notes;
+                            if (!suppress_autofree_notes) {
+                                printf("[Tantrums] note: runtime auto-freed pointer at line %d (Layer 2)\n", p->alloc_line);
+                            }
+                            free(p->target);
+                            p->target = nullptr;
+                            p->is_valid = false;
+                        }
+                    }
+                    o = o->next;
+                }
+            }
+        } break;
+
         case OP_ALLOC: {
             Value v = vm_peek(vm, 0);
             /* Wrap in a pointer — manual memory */
@@ -411,6 +466,16 @@ static InterpretResult run(VM* vm) {
             *heap = v;
             ObjPointer* ptr = obj_pointer_new(heap);
             ptr->obj.is_manual = true;
+            ptr->alloc_size = sizeof(ObjPointer) + sizeof(Value);
+            
+            ObjString* type_str = AS_STRING(READ_CONSTANT());
+            ptr->alloc_type = type_str;
+            ptr->alloc_func = frame->function->name;
+            int offset = (int)(frame->ip - frame->function->chunk->code - 2);
+            ptr->alloc_line = frame->function->chunk->lines[offset];
+            ptr->scope_depth = vm->scope_depth;
+            ptr->escaped = false;
+            
             vm->stack_top -= 1;
             vm_push(vm, OBJ_VAL(ptr));
         } break;

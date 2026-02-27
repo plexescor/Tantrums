@@ -9,6 +9,7 @@ typedef struct {
     ObjFunction* function;
     uint8_t*     ip;
     Value*       slots;       /* first stack slot for this frame */
+    int          saved_scope_depth; /* vm->scope_depth before this call */
 } CallFrame;
 
 #define MAX_EXCEPTION_HANDLERS 64
@@ -20,6 +21,8 @@ typedef struct {
     int      err_slot;      /* local slot for error variable (-1 if none) */
 } ExceptionHandler;
 
+#define MAX_LOCAL_SCOPES 1024
+
 struct VM {
     CallFrame frames[MAX_FRAMES];
     int       frame_count;
@@ -29,6 +32,8 @@ struct VM {
     Obj*      objects;        /* linked list of all heap objects */
     ExceptionHandler handlers[MAX_EXCEPTION_HANDLERS];
     int       handler_count;
+    int       scope_depth;
+    Value*    scope_base_slots[MAX_LOCAL_SCOPES];
 };
 
 typedef enum {

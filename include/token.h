@@ -40,6 +40,7 @@ typedef enum {
     /* Type keywords */
     TOKEN_TYPE_INT, TOKEN_TYPE_FLOAT, TOKEN_TYPE_STRING,
     TOKEN_TYPE_BOOL, TOKEN_TYPE_LIST, TOKEN_TYPE_MAP,
+    TOKEN_VOID,
 
     TOKEN_EOF, TOKEN_ERROR,
 } TokenType;

@@ -6,9 +6,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#ifdef _WIN32
-extern "C" __declspec(dllimport) int __stdcall SetConsoleOutputCP(unsigned int);
-#endif
+
+const char* current_bytecode_path = nullptr;
+bool suppress_autofree_notes = false;
 
 static char* read_file(const char* path) {
     FILE* f = fopen(path, "rb");
@@ -46,8 +46,8 @@ static char* make_bytecode_path(const char* source_path) {
 static ObjFunction* compile_source(char* source) {
     /* ── Pre-scan for #mode directive ── */
     CompileMode mode = MODE_BOTH;
-    char* mode_line = strstr(source, "#mode ");
-    if (mode_line) {
+    char* mode_line = source;
+    while ((mode_line = strstr(mode_line, "#mode "))) {
         if (strncmp(mode_line + 6, "static", 6) == 0) {
             mode = MODE_STATIC;
             printf("[Tantrums] Mode: static (all variables must have types)\n");
@@ -62,6 +62,7 @@ static ObjFunction* compile_source(char* source) {
         char* end = strchr(mode_line, '\n');
         if (!end) end = mode_line + strlen(mode_line);
         memset(mode_line, ' ', end - mode_line);
+        mode_line = end;
     }
 
     Lexer lexer;
@@ -205,82 +206,112 @@ static void print_usage() {
 
 int main(int argc, char* argv[]) {
 #ifdef _WIN32
-    SetConsoleOutputCP(65001);
+    system("chcp 65001 > nul 2>&1");
 #endif
     if (argc < 2) { print_usage(); return 0; }
 
-    const char* cmd = argv[1];
+    const char* file_path = nullptr;
 
-    /* ── tantrums run <file.42AHH> ─────────────────── */
-    if (strcmp(cmd, "run") == 0) {
-        if (argc < 3) { fprintf(stderr, "Usage: tantrums run <file.42AHH>\n"); return 1; }
-        const char* source_path = argv[2];
+    if (strcmp(argv[1], "run") == 0) {
+        int arg_idx = 2;
+        if (argc > 2 && strcmp(argv[arg_idx], "--no-autofree-notes") == 0) {
+            suppress_autofree_notes = true;
+            arg_idx++;
+        }
+        if (arg_idx >= argc) {
+            fprintf(stderr, "Usage: tantrums run [--no-autofree-notes] <file.42AHH>\n");
+            return 1;
+        }
+        file_path = argv[arg_idx];
 
-        /* Step 1: Read source */
-        char* source = read_file(source_path);
+        printf("DEBUG: read_file\n");
+        char* source = read_file(file_path);
         if (!source) return 1;
 
-        /* Step 2: Compile to ObjFunction */
+        printf("DEBUG: calling compile_source\n");
         ObjFunction* script = compile_source(source);
-        free(source);
-        if (!script) { fprintf(stderr, "Compilation failed.\n"); return 65; }
+        if (!script) {
+            fprintf(stderr, "Compilation failed.\n");
+            free(source);
+            return 1;
+        }
+        printf("DEBUG: compiled_source returned\n");
 
-        /* Step 3: Write .42ass bytecode file */
-        char* bc_path = make_bytecode_path(source_path);
-        if (!bytecode_write(bc_path, script)) { free(bc_path); return 1; }
-        printf("[Tantrums] Compiled -> %s\n", bc_path);
+        /* Generate .42ass file path */
+        char* bytecode_path = make_bytecode_path(file_path);
+        current_bytecode_path = bytecode_path;
+        bytecode_write(bytecode_path, script);
 
-        /* Step 4: Load .42ass and run */
-        ObjFunction* loaded = bytecode_read(bc_path);
-        free(bc_path);
-        if (!loaded) return 1;
-
-        VM* vm = (VM*)malloc(sizeof(VM));
-        vm_init(vm);
-        InterpretResult result = vm_interpret_compiled(vm, loaded);
-        vm_free(vm);
-        free(vm);
-
-        return result == INTERPRET_OK ? 0 : 70;
-    }
-
-    /* ── tantrums compile <file.42AHH> ─────────────── */
-    if (strcmp(cmd, "compile") == 0) {
-        if (argc < 3) { fprintf(stderr, "Usage: tantrums compile <file.42AHH>\n"); return 1; }
-        const char* source_path = argv[2];
-
-        char* source = read_file(source_path);
-        if (!source) return 1;
-
-        ObjFunction* script = compile_source(source);
-        free(source);
-        if (!script) { fprintf(stderr, "Compilation failed.\n"); return 65; }
-
-        char* bc_path = make_bytecode_path(source_path);
-        bool ok = bytecode_write(bc_path, script);
-        if (ok) printf("[Tantrums] Compiled -> %s\n", bc_path);
-        free(bc_path);
-
-        return ok ? 0 : 1;
-    }
-
-    /* ── tantrums exec <file.42ass> ────────────────── */
-    if (strcmp(cmd, "exec") == 0) {
-        if (argc < 3) { fprintf(stderr, "Usage: tantrums exec <file.42ass>\n"); return 1; }
-        const char* bc_path = argv[2];
-
-        ObjFunction* script = bytecode_read(bc_path);
-        if (!script) return 1;
-
+        /* Interpret */
+        printf("[Tantrums] Compiled -> %s\n", bytecode_path);
         VM* vm = (VM*)malloc(sizeof(VM));
         vm_init(vm);
         InterpretResult result = vm_interpret_compiled(vm, script);
         vm_free(vm);
         free(vm);
 
-        return result == INTERPRET_OK ? 0 : 70;
-    }
+        if (bytecode_path) free(bytecode_path);
+        free(source);
+        current_bytecode_path = nullptr;
+        return (result == INTERPRET_OK) ? 0 : 1;
+        
+    } else if (strcmp(argv[1], "compile") == 0) {
+        int arg_idx = 2;
+        if (argc > 2 && strcmp(argv[arg_idx], "--no-autofree-notes") == 0) {
+            suppress_autofree_notes = true;
+            arg_idx++;
+        }
+        if (arg_idx >= argc) {
+            fprintf(stderr, "Usage: tantrums compile [--no-autofree-notes] <file.42AHH>\n");
+            return 1;
+        }
+        file_path = argv[arg_idx];
 
-    fprintf(stderr, "Unknown command '%s'. Use 'run', 'compile', or 'exec'.\n", cmd);
-    return 1;
+        char* source = read_file(file_path);
+        if (!source) return 1;
+        ObjFunction* script = compile_source(source);
+        if (!script) {
+            fprintf(stderr, "Compilation failed.\n");
+            free(source);
+            return 1;
+        }
+
+        char* bytecode_path = make_bytecode_path(file_path);
+        bytecode_write(bytecode_path, script);
+        printf("Compiled successfully to '%s'.\n", bytecode_path);
+        
+        free(bytecode_path);
+        free(source);
+        return 0;
+
+    } else if (strcmp(argv[1], "exec") == 0) {
+        int arg_idx = 2;
+        if (argc > 2 && strcmp(argv[arg_idx], "--no-autofree-notes") == 0) {
+            suppress_autofree_notes = true;
+            arg_idx++;
+        }
+        if (arg_idx >= argc) {
+            fprintf(stderr, "Usage: tantrums exec [--no-autofree-notes] <file.42ass>\n");
+            return 1;
+        }
+        file_path = argv[arg_idx];
+
+        ObjFunction* script = bytecode_read(file_path);
+        if (!script) {
+            fprintf(stderr, "Failed to load bytecode file.\n");
+            return 1;
+        }
+        VM* vm = (VM*)malloc(sizeof(VM));
+        vm_init(vm);
+        current_bytecode_path = file_path;
+        InterpretResult result = vm_interpret_compiled(vm, script);
+        vm_free(vm);
+        free(vm);
+        current_bytecode_path = nullptr;
+        return (result == INTERPRET_OK) ? 0 : 1;
+
+    } else {
+        fprintf(stderr, "Unknown command '%s'. Use run, compile, or exec.\n", argv[1]);
+        return 1;
+    }
 }

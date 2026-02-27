@@ -110,6 +110,7 @@ static TokenType identifier_type(Lexer* l) {
             }
         } break;
     case 'u': return check_keyword(l, 1, 2, "se", TOKEN_USE);
+    case 'v': return check_keyword(l, 1, 3, "oid", TOKEN_VOID);
     case 'w': return check_keyword(l, 1, 4, "hile", TOKEN_WHILE);
     }
     return TOKEN_IDENTIFIER;
