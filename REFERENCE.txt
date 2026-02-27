@@ -28,6 +28,7 @@ WHAT'S IMPLEMENTED (v1)
   [x] If / else if / else
   [x] While loop
   [x] For-in loop         for i in range(N), for i in list, for i in "string"
+  [x] Loop control        break, continue
   [x] Operators           + - * / % == != < > <= >= => =< && || and or !
   [x] String escapes       \n \t \\ \" \r \0
   [x] Auto string concat   "age: " + 25 -> "age: 25"
@@ -108,7 +109,7 @@ FUNCTIONS:
   // With return type
   tantrum int add(int a, int b)
   {
-      return a + b;
+      return (a + b);
   }
 
   // Without return type
@@ -120,7 +121,7 @@ FUNCTIONS:
   // Dynamic (no types at all)
   tantrum multiply(a, b)
   {
-      return a * b;
+      return (a * b);
   }
 
 
@@ -224,7 +225,7 @@ TYPE CHECKING:
 
   tantrum int add(float a, float b)     // typed params
   {
-      return a + b;
+      return (a + b);
   }
 
   print(add("hello", "world"));         // ERROR: param 1 expects 'float' but got 'string'
@@ -251,6 +252,13 @@ BUILT-IN FUNCTIONS:
   toMilliseconds(ms);     Returns a float parsing input milliseconds to ms
   toMinutes(ms);          Returns a float parsing input milliseconds to minutes
   toHours(ms);            Returns a float parsing input milliseconds to hours
+
+  getProcessMemory();     Returns Resident Set Size (RSS) of the Tantrums process in bytes
+  getVmMemory();          Returns current Tantrums-managed heap usage in bytes
+  getVmPeakMemory();      Returns highest observed value of VM allocations in bytes
+  bytesToKB(bytes);       Returns a float converting raw bytes to Kilobytes
+  bytesToMB(bytes);       Returns a float converting raw bytes to Megabytes
+  bytesToGB(bytes);       Returns a float converting raw bytes to Gigabytes
 
   input("prompt");        Reads line from user. Return type depends on
                           the variable declaration:
@@ -349,9 +357,9 @@ COMPLETE EXAMPLE PROGRAM
   {
       if (n <= 1)
       {
-          return n;
+          return (n);
       }
-      return fib(n - 1) + fib(n - 2);
+      return (fib(n - 1) + fib(n - 2));
   }
 
   tantrum main()

@@ -43,14 +43,24 @@ Value vm_peek(VM* vm, int distance) {
     return vm->stack_top[-1 - distance];
 }
 
-void vm_runtime_error(VM* vm, const char* fmt, ...) {
+bool vm_runtime_error(VM* vm, const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    fprintf(stderr, "\n[Tantrums Runtime Error] ");
-    vfprintf(stderr, fmt, args);
+    char buffer[1024];
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
-    fprintf(stderr, "\n");
 
+    if (vm->handler_count > 0) {
+        ExceptionHandler* h = &vm->handlers[--vm->handler_count];
+        vm->stack_top = h->stack_top;
+        vm->frame_count = h->frame_count;
+        CallFrame* frame = &vm->frames[vm->frame_count - 1];
+        frame->ip = h->catch_ip;
+        vm_push(vm, OBJ_VAL(obj_string_new(buffer, (int)strlen(buffer))));
+        return true; // Error was caught, continue execution
+    }
+
+    fprintf(stderr, "\n[Tantrums Runtime Error] %s\n", buffer);
     for (int i = vm->frame_count - 1; i >= 0; i--) {
         CallFrame* frame = &vm->frames[i];
         ObjFunction* fn = frame->function;
@@ -58,11 +68,13 @@ void vm_runtime_error(VM* vm, const char* fmt, ...) {
         int line = fn->chunk->lines[offset];
         fprintf(stderr, "  [line %d] in %s\n", line, fn->name ? fn->name->chars : "<script>");
     }
+    return false; // Fatal error
 }
 
-static bool is_falsy(Value v) {
-    if (IS_NULL(v)) return true;
+static bool is_falsy(VM* vm, Value v, bool* error) {
+    *error = false;
     if (IS_BOOL(v)) return !AS_BOOL(v);
+    *error = true;
     return false;
 }
 
@@ -78,33 +90,48 @@ static Value num_mul(Value a, Value b) {
     if (IS_INT(a) && IS_INT(b)) return INT_VAL(AS_INT(a) * AS_INT(b));
     return FLOAT_VAL(value_as_number(a) * value_as_number(b));
 }
-static Value num_div(Value a, Value b) {
+static bool num_div(VM* vm, Value a, Value b, Value* out) {
     if (IS_INT(a) && IS_INT(b)) {
-        if (AS_INT(b) == 0) return INT_VAL(0);
-        return INT_VAL(AS_INT(a) / AS_INT(b));
+        if (AS_INT(b) == 0) {
+            vm_runtime_error(vm, "Division by zero.");
+            return false;
+        }
+        *out = INT_VAL(AS_INT(a) / AS_INT(b));
+        return true;
     }
     double d = value_as_number(b);
-    if (d == 0) return FLOAT_VAL(0);
-    return FLOAT_VAL(value_as_number(a) / d);
-}
-static Value num_mod(Value a, Value b) {
-    if (IS_INT(a) && IS_INT(b)) {
-        if (AS_INT(b) == 0) return INT_VAL(0);
-        return INT_VAL(AS_INT(a) % AS_INT(b));
+    if (d == 0) {
+        vm_runtime_error(vm, "Division by zero.");
+        return false;
     }
-    return INT_VAL(0);
+    *out = FLOAT_VAL(value_as_number(a) / d);
+    return true;
+}
+static bool num_mod(VM* vm, Value a, Value b, Value* out) {
+    if (IS_INT(a) && IS_INT(b)) {
+        if (AS_INT(b) == 0) {
+            vm_runtime_error(vm, "Modulo by zero.");
+            return false;
+        }
+        *out = INT_VAL(AS_INT(a) % AS_INT(b));
+        return true;
+    }
+    vm_runtime_error(vm, "Modulo operands must be integers.");
+    return false;
 }
 
 static bool call_value(VM* vm, Value callee, int argc) {
     if (IS_FUNCTION(callee)) {
         ObjFunction* fn = AS_FUNCTION(callee);
         if (argc != fn->arity) {
-            vm_runtime_error(vm, "'%s' expected %d args but got %d.", fn->name ? fn->name->chars : "?", fn->arity, argc);
-            return false;
+            if (!vm_runtime_error(vm, "'%s' expected %d args but got %d.", fn->name ? fn->name->chars : "?", fn->arity, argc))
+                return false;
+            return true; // if caught, proceed
         }
         if (vm->frame_count >= MAX_FRAMES) {
-            vm_runtime_error(vm, "Stack overflow (too many calls).");
-            return false;
+            if (!vm_runtime_error(vm, "Stack overflow (too many calls)."))
+                return false;
+            return true;
         }
         CallFrame* frame = &vm->frames[vm->frame_count++];
         frame->function = fn;
@@ -119,8 +146,9 @@ static bool call_value(VM* vm, Value callee, int argc) {
         vm_push(vm, result);
         return true;
     }
-    vm_runtime_error(vm, "Can only call functions.");
-    return false;
+    if (!vm_runtime_error(vm, "Can only call functions."))
+        return false;
+    return true;
 }
 
 static InterpretResult run(VM* vm) {
@@ -194,8 +222,18 @@ static InterpretResult run(VM* vm) {
         } break;
         case OP_SUB: { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, num_sub(a, b)); } break;
         case OP_MUL: { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, num_mul(a, b)); } break;
-        case OP_DIV: { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, num_div(a, b)); } break;
-        case OP_MOD: { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, num_mod(a, b)); } break;
+        case OP_DIV: {
+            Value b = vm_pop(vm), a = vm_pop(vm);
+            Value res;
+            if (!num_div(vm, a, b, &res)) return INTERPRET_RUNTIME_ERROR;
+            vm_push(vm, res);
+        } break;
+        case OP_MOD: {
+            Value b = vm_pop(vm), a = vm_pop(vm);
+            Value res;
+            if (!num_mod(vm, a, b, &res)) return INTERPRET_RUNTIME_ERROR;
+            vm_push(vm, res);
+        } break;
         case OP_NEGATE: {
             Value v = vm_pop(vm);
             if (IS_INT(v)) vm_push(vm, INT_VAL(-AS_INT(v)));
@@ -208,7 +246,17 @@ static InterpretResult run(VM* vm) {
         case OP_GT:  { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, BOOL_VAL(value_as_number(a) > value_as_number(b))); } break;
         case OP_LTE: { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, BOOL_VAL(value_as_number(a) <= value_as_number(b))); } break;
         case OP_GTE: { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, BOOL_VAL(value_as_number(a) >= value_as_number(b))); } break;
-        case OP_NOT: { Value v = vm_pop(vm); vm_push(vm, BOOL_VAL(is_falsy(v))); } break;
+        case OP_NOT: {
+            Value v = vm_pop(vm);
+            bool err = false;
+            bool falsy = is_falsy(vm, v, &err);
+            if (err) {
+                if (!vm_runtime_error(vm, "Condition must be a boolean, got %s.", value_type_name(v)))
+                    return INTERPRET_RUNTIME_ERROR;
+            } else {
+                vm_push(vm, BOOL_VAL(falsy));
+            }
+        } break;
 
         case OP_POP: vm_pop(vm); break;
 
@@ -218,10 +266,11 @@ static InterpretResult run(VM* vm) {
             ObjString* name = AS_STRING(READ_CONSTANT());
             Value val;
             if (!table_get(&vm->globals, name, &val)) {
-                vm_runtime_error(vm, "Undefined variable '%s'.", name->chars);
-                return INTERPRET_RUNTIME_ERROR;
+                if (!vm_runtime_error(vm, "Undefined variable '%s'.", name->chars))
+                    return INTERPRET_RUNTIME_ERROR;
+            } else {
+                vm_push(vm, val);
             }
-            vm_push(vm, val);
         } break;
         case OP_SET_GLOBAL: {
             ObjString* name = AS_STRING(READ_CONSTANT());
@@ -234,7 +283,17 @@ static InterpretResult run(VM* vm) {
         } break;
 
         case OP_JUMP:          { uint16_t off = READ_SHORT(); frame->ip += off; } break;
-        case OP_JUMP_IF_FALSE: { uint16_t off = READ_SHORT(); if (is_falsy(vm_peek(vm, 0))) frame->ip += off; } break;
+        case OP_JUMP_IF_FALSE: {
+            uint16_t off = READ_SHORT();
+            bool err = false;
+            bool falsy = is_falsy(vm, vm_peek(vm, 0), &err);
+            if (err) {
+                if (!vm_runtime_error(vm, "Condition must be a boolean, got %s.", value_type_name(vm_peek(vm, 0))))
+                    return INTERPRET_RUNTIME_ERROR;
+            } else {
+                if (falsy) frame->ip += off;
+            }
+        } break;
         case OP_LOOP:          { uint16_t off = READ_SHORT(); frame->ip -= off; } break;
 
         case OP_CALL: {
@@ -270,7 +329,7 @@ static InterpretResult run(VM* vm) {
             for (int i = count - 1; i >= 0; i--) {
                 Value val = vm_peek(vm, i * 2);
                 Value key = vm_peek(vm, i * 2 + 1);
-                if (IS_STRING(key)) obj_map_set(map, AS_STRING(key), val);
+                obj_map_set(map, key, val);
             }
             map->obj.is_manual = false;
             vm->stack_top -= count * 2;
@@ -278,42 +337,47 @@ static InterpretResult run(VM* vm) {
         } break;
 
         case OP_INDEX_GET: {
-            Value idx = vm_peek(vm, 0);
-            Value obj = vm_peek(vm, 1);
-            Value result = NULL_VAL;
-            if (IS_LIST(obj) && IS_INT(idx)) {
-                ObjList* l = AS_LIST(obj);
-                int i = (int)AS_INT(idx);
-                if (i < 0 || i >= l->count) { result = NULL_VAL; }
-                else result = l->items[i];
-            } else if (IS_STRING(obj) && IS_INT(idx)) {
-                ObjString* s = AS_STRING(obj);
-                int i = (int)AS_INT(idx);
-                if (i < 0 || i >= s->length) { result = NULL_VAL; }
-                else result = OBJ_VAL(obj_string_new(&s->chars[i], 1));
-            } else if (IS_MAP(obj)) {
-                ObjString* s_idx = nullptr;
-                if (IS_STRING(idx)) {
-                    s_idx = AS_STRING(idx);
-                } else if (IS_INT(idx)) {
-                    char buf[32];
-                    snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(idx));
-                    s_idx = obj_string_new(buf, (int)strlen(buf));
-                }
-                if (s_idx) {
-                    if (obj_map_get(AS_MAP(obj), s_idx, &result)) {}
-                    else result = NULL_VAL;
-                } else {
-                    vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
-                    return INTERPRET_RUNTIME_ERROR;
-                }
-            } else {
-                vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
-                return INTERPRET_RUNTIME_ERROR;
-            }
-            vm->stack_top -= 2;
-            vm_push(vm, result);
-        } break;
+    Value idx = vm_peek(vm, 0);
+    Value obj = vm_peek(vm, 1);
+    Value result = NULL_VAL;
+    if (IS_LIST(obj) && IS_INT(idx)) {
+        ObjList* l = AS_LIST(obj);
+        int i = (int)AS_INT(idx);
+        if (i < 0 || i >= l->count) { result = NULL_VAL; }
+        else result = l->items[i];
+    } else if (IS_STRING(obj) && IS_INT(idx)) {
+        ObjString* s = AS_STRING(obj);
+        int i = (int)AS_INT(idx);
+        if (i < 0 || i >= s->length) { result = NULL_VAL; }
+        else result = OBJ_VAL(obj_string_new(&s->chars[i], 1));
+    } else if (IS_MAP(obj)) {
+        // Special case for our internal for-in loop which currently yields index integers
+        if (IS_INT(idx) && AS_INT(idx) >= 0 && AS_INT(idx) < AS_MAP(obj)->capacity) {
+             // Wait, the previous implementation used `idx` as "nth occupied element"
+             ObjMap* map = AS_MAP(obj);
+             int n = (int)AS_INT(idx);
+             int found = 0;
+             for (int mi = 0; mi < map->capacity; mi++) {
+                 if (map->entries[mi].occupied) {
+                     if (found == n) {
+                         result = map->entries[mi].key;
+                         goto index_get_done;
+                     }
+                     found++;
+                 }
+             }
+             // If not found as Nth element, we still proceed to map lookup just in case
+        }
+        
+        if (!obj_map_get(AS_MAP(obj), idx, &result)) result = NULL_VAL;
+    } else {
+        vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
+        return INTERPRET_RUNTIME_ERROR;
+    }
+    index_get_done:
+    vm->stack_top -= 2;
+    vm_push(vm, result);
+} break;
 
         case OP_INDEX_SET: {
             Value val = vm_peek(vm, 0);
@@ -324,22 +388,10 @@ static InterpretResult run(VM* vm) {
                 int i = (int)AS_INT(idx);
                 if (i >= 0 && i < l->count) l->items[i] = val;
             } else if (IS_MAP(obj)) {
-                ObjString* s_idx = nullptr;
-                if (IS_STRING(idx)) {
-                    s_idx = AS_STRING(idx);
-                } else if (IS_INT(idx)) {
-                    char buf[32];
-                    snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(idx));
-                    s_idx = obj_string_new(buf, (int)strlen(buf));
-                }
-                if (s_idx) {
-                    obj_map_set(AS_MAP(obj), s_idx, val);
-                } else {
-                    vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
-                    return INTERPRET_RUNTIME_ERROR;
-                }
+                obj_map_set(AS_MAP(obj), idx, val);
             }
-            vm->stack_top -= 3;
+            vm->stack_top[-3] = val;
+            vm->stack_top -= 2;
         } break;
 
         case OP_PRINT: { value_print(vm_pop(vm)); printf("\n"); } break;
@@ -385,20 +437,20 @@ static InterpretResult run(VM* vm) {
         case OP_PTR_DEREF: {
             Value v = vm_pop(vm);
             if (!IS_POINTER(v)) {
-                vm_runtime_error(vm, "Cannot dereference a non-pointer.");
-                return INTERPRET_RUNTIME_ERROR;
+                if (!vm_runtime_error(vm, "Cannot dereference a non-pointer."))
+                    return INTERPRET_RUNTIME_ERROR;
             }
             ObjPointer* p = AS_POINTER(v);
             if (!p->is_valid || !p->target) {
-                vm_runtime_error(vm, "Null pointer dereference!");
-                return INTERPRET_RUNTIME_ERROR;
+                if (!vm_runtime_error(vm, "Null pointer dereference!"))
+                    return INTERPRET_RUNTIME_ERROR;
             }
             vm_push(vm, *p->target);
         } break;
 
         case OP_PTR_SET: {
             Value ptr_val = vm_pop(vm);
-            Value new_val = vm_pop(vm);
+            Value new_val = vm_peek(vm, 0);
             if (!IS_POINTER(ptr_val)) {
                 vm_runtime_error(vm, "Cannot dereference a non-pointer for assignment.");
                 return INTERPRET_RUNTIME_ERROR;
@@ -479,6 +531,29 @@ static InterpretResult run(VM* vm) {
             }
             vm->stack_top -= 1;
             vm_push(vm, result);
+        } break;
+
+        case OP_CLONE: {
+            Value v = vm_peek(vm, 0);
+            if (IS_LIST(v)) {
+                vm->stack_top -= 1;
+                vm_push(vm, OBJ_VAL(obj_list_clone(AS_LIST(v))));
+            } else {
+                // For now, only lists are cloneable. Other types are copied by value or reference.
+                // If we want to clone other types, we'd add more cases here.
+                // For example, for maps:
+                // else if (IS_MAP(v)) {
+                //     vm->stack_top -= 1;
+                //     vm_push(vm, OBJ_VAL(obj_map_clone(AS_MAP(v))));
+                // }
+                // For now, if not a list, just push the original value back (effectively a no-op for non-cloneable types)
+                // Or, raise a runtime error if cloning is strictly defined for specific types.
+                // For simplicity, we'll just pop and push the original value back, making it a no-op for non-lists.
+                // This means `clone(x)` where `x` is not a list will just return `x`.
+                // If we want to enforce cloneability, we'd do:
+                // vm_runtime_error(vm, "Cannot clone type %s.", value_type_name(v));
+                // return INTERPRET_RUNTIME_ERROR;
+            }
         } break;
 
         case OP_THROW: {

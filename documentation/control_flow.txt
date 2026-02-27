@@ -62,7 +62,10 @@ Tantrums provides an absolute powerhouse of looping constructs. You have standar
 
 3. List Iterators:
    You can directly iterate over a list. The compiler maintains the internal 
-   index index for you safely so you never hit an out-of-bounds error.
+   index for you securely. Even better, Tantrums creates a frozen snapshot 
+   of the list before the loop begins. If you dynamically append or remove 
+   items from the list while iterating, it is completely safe and will not 
+   corrupt the iteration loop!
 
    for item in [1, 2, 3] 
    {
@@ -107,14 +110,10 @@ LAUGHS & FACTS: THE AST LOOP UNROLLING
   past the evaluation block. This saves precious CPU cycles so you can use them 
   for more important things (like creating memory leaks).
 
-- There are no `break` or `continue` keywords yet. Wait, what? Yes. Early in 
-  development, the bytecode compiler had trouble managing scope jump offsets 
-  backward and forward. We eventually got `if` and `while` loop jumps working 
-  perfectly, but adding `break` required calculating the jump offset *before* 
-  the compiler knew where the end of the surrounding block actually was. We gave 
-  up and left it out. If you want to break a loop, use a boolean flag like 
-  `bool running = true; while(running) { running = false; }`. Welcome back to 
-  the 1980s!
+- `break` and `continue` keywords are now fully supported! You can break out of
+  loops prematurely or skip the rest of the current iteration. The compiler
+  does all the hard work calculating the proper bytecode jump offsets. You
+  no longer have to use a boolean flag like we did in the 1980s!
 
 - The compiler emits `OP_JUMP_IF_FALSE` and `OP_LOOP` bytecode instructions 
   to execute conditionals. The operand for these jumps is a signed integer 

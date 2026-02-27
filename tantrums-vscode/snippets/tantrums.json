@@ -173,7 +173,7 @@
     },
     "Return": {
         "prefix": "return",
-        "body": "return ${1:value};",
+        "body": "return (${1:value});",
         "description": "Return from function"
     },
     "Len": {
@@ -243,5 +243,35 @@
             "}"
         ],
         "description": "Try-catch block without error variable"
+    },
+    "Get Process Memory": {
+        "prefix": "getProcessMemory",
+        "body": "getProcessMemory()",
+        "description": "Returns Resident Set Size (RSS) of the Tantrums process in bytes"
+    },
+    "Get VM Memory": {
+        "prefix": "getVmMemory",
+        "body": "getVmMemory()",
+        "description": "Returns current Tantrums-managed heap usage in bytes"
+    },
+    "Get VM Peak Memory": {
+        "prefix": "getVmPeakMemory",
+        "body": "getVmPeakMemory()",
+        "description": "Returns highest observed value of VM allocations in bytes"
+    },
+    "Bytes To KB": {
+        "prefix": "bytesToKB",
+        "body": "bytesToKB(${1:bytes})",
+        "description": "Converts raw bytes to Kilobytes"
+    },
+    "Bytes To MB": {
+        "prefix": "bytesToMB",
+        "body": "bytesToMB(${1:bytes})",
+        "description": "Converts raw bytes to Megabytes"
+    },
+    "Bytes To GB": {
+        "prefix": "bytesToGB",
+        "body": "bytesToGB(${1:bytes})",
+        "description": "Converts raw bytes to Gigabytes"
     }
 }

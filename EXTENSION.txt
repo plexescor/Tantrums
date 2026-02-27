@@ -61,6 +61,7 @@ FEATURES — IMPLEMENTED
   [x] Autocomplete: variable names (discovered from current file)
   [x] Built-in functions show param signatures in detail popup
   [x] Snippet: Time API routines (getCurrentTime, toSeconds, toMilliseconds, toMinutes, toHours)
+  [x] Snippet: Memory API (getProcessMemory, getVmMemory, getVmPeakMemory, bytesToKB, bytesToMB, bytesToGB)
 
   ERROR HIGHLIGHTING (DIAGNOSTICS):
   ----------------------------------

@@ -258,6 +258,12 @@ static ASTNode* call_expr(Parser* p) {
             idx->as.index_access.index = expression(p);
             consume(p, TOKEN_RIGHT_BRACKET, "Expected ']'.");
             expr = idx;
+        } else if (expr->type == NODE_IDENTIFIER && (check(p, TOKEN_PLUS_PLUS) || check(p, TOKEN_MINUS_MINUS))) {
+            TokenType op = advance_tok(p)->type;
+            ASTNode* postfix = ast_new(NODE_POSTFIX, previous(p)->line);
+            postfix->as.postfix.operand = expr;
+            postfix->as.postfix.op = op;
+            expr = postfix;
         } else break;
     }
     return expr;
@@ -365,8 +371,81 @@ static ASTNode* logic_or(Parser* p) {
     return left;
 }
 
+static ASTNode* assignment(Parser* p) {
+    ASTNode* expr = logic_or(p);
+
+    if (match(p, TOKEN_EQUAL)) {
+        if (expr->type == NODE_IDENTIFIER) {
+            ASTNode* n = ast_new(NODE_ASSIGN, expr->line);
+            n->as.assign.name = copy_lexeme_str(expr->as.identifier.name, expr->as.identifier.length);
+            ast_free(expr);
+            n->as.assign.value = assignment(p); // Right-associative
+            return n;
+        } else if (expr->type == NODE_INDEX) {
+            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
+            n->as.index_assign.object = expr->as.index_access.object;
+            n->as.index_assign.index = expr->as.index_access.index;
+            n->as.index_assign.value = assignment(p);
+            free(expr);
+            return n;
+        } else if (expr->type == NODE_UNARY && expr->as.unary.op == TOKEN_STAR) {
+            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
+            n->as.index_assign.object = expr->as.unary.operand;
+            n->as.index_assign.index = nullptr;
+            n->as.index_assign.value = assignment(p);
+            free(expr);
+            return n;
+        } else {
+            fprintf(stderr, "[Line %d] Error: Invalid assignment target.\n", expr->line);
+            p->had_error = true;
+        }
+    } else if ((expr->type == NODE_IDENTIFIER || expr->type == NODE_INDEX || (expr->type == NODE_UNARY && expr->as.unary.op == TOKEN_STAR)) &&
+        (match(p, TOKEN_PLUS_EQUAL) || match(p, TOKEN_MINUS_EQUAL) || match(p, TOKEN_STAR_EQUAL) || match(p, TOKEN_SLASH_EQUAL) || match(p, TOKEN_PERCENT_EQUAL))) {
+        
+        TokenType compound = previous(p)->type;
+        TokenType op;
+        switch (compound) {
+            case TOKEN_PLUS_EQUAL:    op = TOKEN_PLUS; break;
+            case TOKEN_MINUS_EQUAL:   op = TOKEN_MINUS; break;
+            case TOKEN_STAR_EQUAL:    op = TOKEN_STAR; break;
+            case TOKEN_SLASH_EQUAL:   op = TOKEN_SLASH; break;
+            case TOKEN_PERCENT_EQUAL: op = TOKEN_PERCENT; break;
+            default:                  op = TOKEN_PLUS; break;
+        }
+        ASTNode* rhs = assignment(p);
+        ASTNode* lhs_read = ast_clone_expr(expr);
+        ASTNode* bin = ast_new(NODE_BINARY, expr->line);
+        bin->as.binary.op = op;
+        bin->as.binary.left = lhs_read;
+        bin->as.binary.right = rhs;
+
+        if (expr->type == NODE_IDENTIFIER) {
+            ASTNode* n = ast_new(NODE_ASSIGN, expr->line);
+            n->as.assign.name = copy_lexeme_str(expr->as.identifier.name, expr->as.identifier.length);
+            ast_free(expr);
+            n->as.assign.value = bin;
+            return n;
+        } else if (expr->type == NODE_INDEX) {
+            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
+            n->as.index_assign.object = expr->as.index_access.object;
+            n->as.index_assign.index = expr->as.index_access.index;
+            n->as.index_assign.value = bin;
+            free(expr);
+            return n;
+        } else {
+            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
+            n->as.index_assign.object = expr->as.unary.operand;
+            n->as.index_assign.index = nullptr;
+            n->as.index_assign.value = bin;
+            free(expr);
+            return n;
+        }
+    }
+    return expr;
+}
+
 static ASTNode* expression(Parser* p) {
-    return logic_or(p);
+    return assignment(p);
 }
 
 /* ── Statements ───────────────────────────────────── */
@@ -467,9 +546,21 @@ static ASTNode* func_declaration(Parser* p) {
 }
 
 static ASTNode* statement(Parser* p) {
+    if (match(p, TOKEN_LEFT_BRACE)) return block(p);
     if (match(p, TOKEN_IF))     return if_statement(p);
     if (match(p, TOKEN_WHILE))  return while_statement(p);
     if (match(p, TOKEN_FOR))    return for_statement(p);
+    
+    if (match(p, TOKEN_BREAK)) {
+        ASTNode* n = ast_new(NODE_BREAK, previous(p)->line);
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after break.");
+        return n;
+    }
+    if (match(p, TOKEN_CONTINUE)) {
+        ASTNode* n = ast_new(NODE_CONTINUE, previous(p)->line);
+        consume(p, TOKEN_SEMICOLON, "Expected ';' after continue.");
+        return n;
+    }
 
     /* try { ... } catch (e) { ... } */
     if (match(p, TOKEN_TRY)) {
@@ -499,7 +590,13 @@ static ASTNode* statement(Parser* p) {
 
     if (match(p, TOKEN_RETURN)) {
         ASTNode* n = ast_new(NODE_RETURN, previous(p)->line);
-        n->as.child = check(p, TOKEN_SEMICOLON) ? nullptr : expression(p);
+        if (check(p, TOKEN_SEMICOLON)) {
+            n->as.child = nullptr;
+        } else {
+            consume(p, TOKEN_LEFT_PAREN, "Return value must be enclosed in parentheses '(' and ')'.");
+            n->as.child = expression(p);
+            consume(p, TOKEN_RIGHT_PAREN, "Expected ')' after return value.");
+        }
         consume(p, TOKEN_SEMICOLON, "Expected ';' after return.");
         return n;
     }
@@ -515,116 +612,8 @@ static ASTNode* statement(Parser* p) {
         consume(p, TOKEN_SEMICOLON, "Expected ';' after free.");
         return n;
     }
-    /* Expression statement (including assignments) */
+    /* Expression statement */
     ASTNode* expr = expression(p);
-
-    /* Postfix i++ / i-- */
-    if (expr->type == NODE_IDENTIFIER &&
-        (check(p, TOKEN_PLUS_PLUS) || check(p, TOKEN_MINUS_MINUS))) {
-        bool is_inc = peek_tok(p)->type == TOKEN_PLUS_PLUS;
-        advance_tok(p);
-        /* Desugar: i = i +/- 1 */
-        ASTNode* var_ref = ast_new(NODE_IDENTIFIER, expr->line);
-        var_ref->as.identifier.name = copy_lexeme_str(expr->as.identifier.name, (int)strlen(expr->as.identifier.name));
-        var_ref->as.identifier.length = (int)strlen(expr->as.identifier.name);
-        ASTNode* one = ast_new(NODE_INT_LIT, expr->line);
-        one->as.int_literal = 1;
-        ASTNode* bin = ast_new(NODE_BINARY, expr->line);
-        bin->as.binary.op = is_inc ? TOKEN_PLUS : TOKEN_MINUS;
-        bin->as.binary.left = var_ref;
-        bin->as.binary.right = one;
-        ASTNode* n = ast_new(NODE_ASSIGN, expr->line);
-        n->as.assign.name = (char*)malloc(strlen(expr->as.identifier.name) + 1);
-        strcpy(n->as.assign.name, expr->as.identifier.name);
-        ast_free(expr);
-        n->as.assign.value = bin;
-        consume(p, TOKEN_SEMICOLON, "Expected ';' after i++ / i--.");
-        return n;
-    }
-
-    /* Compound assignment: += -= *= /= %= */
-    if ((expr->type == NODE_IDENTIFIER ||
-         expr->type == NODE_INDEX ||
-         (expr->type == NODE_UNARY && expr->as.unary.op == TOKEN_STAR)) &&
-        (check(p, TOKEN_PLUS_EQUAL) || check(p, TOKEN_MINUS_EQUAL) ||
-         check(p, TOKEN_STAR_EQUAL) || check(p, TOKEN_SLASH_EQUAL) ||
-         check(p, TOKEN_PERCENT_EQUAL))) {
-        TokenType compound = peek_tok(p)->type;
-        advance_tok(p);
-        TokenType op;
-        switch (compound) {
-        case TOKEN_PLUS_EQUAL:    op = TOKEN_PLUS; break;
-        case TOKEN_MINUS_EQUAL:   op = TOKEN_MINUS; break;
-        case TOKEN_STAR_EQUAL:    op = TOKEN_STAR; break;
-        case TOKEN_SLASH_EQUAL:   op = TOKEN_SLASH; break;
-        case TOKEN_PERCENT_EQUAL: op = TOKEN_PERCENT; break;
-        default:                  op = TOKEN_PLUS; break;
-        }
-        ASTNode* rhs = expression(p);
-
-        ASTNode* lhs_read = ast_clone_expr(expr);
-        ASTNode* bin = ast_new(NODE_BINARY, expr->line);
-        bin->as.binary.op = op;
-        bin->as.binary.left = lhs_read;
-        bin->as.binary.right = rhs;
-
-        if (expr->type == NODE_IDENTIFIER) {
-            /* Desugar: i op= rhs → i = i op rhs */
-            ASTNode* n = ast_new(NODE_ASSIGN, expr->line);
-            n->as.assign.name = copy_lexeme_str(expr->as.identifier.name, expr->as.identifier.length);
-            ast_free(expr);
-            n->as.assign.value = bin;
-            consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment.");
-            return n;
-        } else if (expr->type == NODE_INDEX) {
-            /* Desugar: m[k] op= rhs → m[k] = m[k] op rhs */
-            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
-            n->as.index_assign.object = expr->as.index_access.object;
-            n->as.index_assign.index = expr->as.index_access.index;
-            n->as.index_assign.value = bin;
-            free(expr); // Free top level, but not the object/index pointer
-            consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment.");
-            return n;
-        } else {
-            /* Desugar: *ptr op= rhs → *ptr = *ptr op rhs */
-            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
-            n->as.index_assign.object = expr->as.unary.operand;
-            n->as.index_assign.index = nullptr;
-            n->as.index_assign.value = bin;
-            free(expr);
-            consume(p, TOKEN_SEMICOLON, "Expected ';' after compound assignment.");
-            return n;
-        }
-    }
-
-    /* Check for assignment: ident = expr */
-    if (match(p, TOKEN_EQUAL)) {
-        if (expr->type == NODE_IDENTIFIER) {
-            ASTNode* n = ast_new(NODE_ASSIGN, expr->line);
-            n->as.assign.name = (char*)malloc(strlen(expr->as.identifier.name) + 1);
-            strcpy(n->as.assign.name, expr->as.identifier.name);
-            ast_free(expr);
-            n->as.assign.value = expression(p);
-            consume(p, TOKEN_SEMICOLON, "Expected ';' after assignment.");
-            return n;
-        } else if (expr->type == NODE_INDEX) {
-            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
-            n->as.index_assign.object = expr->as.index_access.object;
-            n->as.index_assign.index = expr->as.index_access.index;
-            n->as.index_assign.value = expression(p);
-            free(expr);
-            consume(p, TOKEN_SEMICOLON, "Expected ';'.");
-            return n;
-        } else if (expr->type == NODE_UNARY && expr->as.unary.op == TOKEN_STAR) {
-            ASTNode* n = ast_new(NODE_INDEX_ASSIGN, expr->line);
-            n->as.index_assign.object = expr->as.unary.operand;
-            n->as.index_assign.index = nullptr;
-            n->as.index_assign.value = expression(p);
-            free(expr);
-            consume(p, TOKEN_SEMICOLON, "Expected ';'.");
-            return n;
-        }
-    }
     ASTNode* s = ast_new(NODE_EXPR_STMT, expr->line);
     s->as.child = expr;
     consume(p, TOKEN_SEMICOLON, "Expected ';' after expression.");

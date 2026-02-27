@@ -8,7 +8,7 @@
 Obj* all_objects = nullptr;
 
 static Obj* allocate_obj(size_t size, ObjType type) {
-    Obj* obj = (Obj*)malloc(size);
+    Obj* obj = (Obj*)tantrums_realloc(nullptr, 0, size);
     obj->type = type;
     obj->refcount = 1;
     obj->is_manual = false;
@@ -93,6 +93,16 @@ ObjList* obj_list_new(void) {
     return l;
 }
 
+ObjList* obj_list_clone(ObjList* origin) {
+    ObjList* l = obj_list_new();
+    l->obj.is_manual = true;
+    for (int i = 0; i < origin->count; i++) {
+        obj_list_append(l, origin->items[i]);
+    }
+    l->obj.is_manual = false;
+    return l;
+}
+
 void obj_list_append(ObjList* l, Value v) {
     if (l->count >= l->capacity) {
         int cap = l->capacity < 8 ? 8 : l->capacity * 2;
@@ -110,6 +120,28 @@ ObjMap* obj_map_new(void) {
     return m;
 }
 
+uint32_t value_hash(Value v) {
+    switch (v.type) {
+        case VAL_NULL:  return 0;
+        case VAL_BOOL:  return AS_BOOL(v) ? 1 : 0;
+        case VAL_INT:   {
+            uint64_t i = (uint64_t)AS_INT(v);
+            return (uint32_t)(i ^ (i >> 32));
+        }
+        case VAL_FLOAT: {
+            double d = AS_FLOAT(v);
+            uint64_t bits;
+            memcpy(&bits, &d, sizeof(double));
+            return (uint32_t)(bits ^ (bits >> 32));
+        }
+        case VAL_OBJ: {
+            if (IS_STRING(v)) return AS_STRING(v)->hash;
+            return (uint32_t)((uintptr_t)AS_OBJ(v) >> 3); // simple pointer hash for other objects
+        }
+    }
+    return 0;
+}
+
 static void map_grow(ObjMap* m) {
     int cap = m->capacity < 8 ? 8 : m->capacity * 2;
     MapEntry* old = m->entries;
@@ -124,9 +156,9 @@ static void map_grow(ObjMap* m) {
     free(old);
 }
 
-bool obj_map_set(ObjMap* m, ObjString* key, Value value) {
+bool obj_map_set(ObjMap* m, Value key, Value value) {
     if (m->count + 1 > m->capacity * 0.75) map_grow(m);
-    uint32_t idx = key->hash & (m->capacity - 1);
+    uint32_t idx = value_hash(key) & (m->capacity - 1);
     for (;;) {
         MapEntry* e = &m->entries[idx];
         if (!e->occupied) {
@@ -134,8 +166,7 @@ bool obj_map_set(ObjMap* m, ObjString* key, Value value) {
             m->count++;
             return true;
         }
-        if (e->key->hash == key->hash && e->key->length == key->length &&
-            memcmp(e->key->chars, key->chars, key->length) == 0) {
+        if (value_equal(e->key, key)) {
             e->value = value;
             return false;
         }
@@ -143,14 +174,13 @@ bool obj_map_set(ObjMap* m, ObjString* key, Value value) {
     }
 }
 
-bool obj_map_get(ObjMap* m, ObjString* key, Value* out) {
+bool obj_map_get(ObjMap* m, Value key, Value* out) {
     if (m->count == 0) return false;
-    uint32_t idx = key->hash & (m->capacity - 1);
+    uint32_t idx = value_hash(key) & (m->capacity - 1);
     for (;;) {
         MapEntry* e = &m->entries[idx];
         if (!e->occupied) return false;
-        if (e->key->hash == key->hash && e->key->length == key->length &&
-            memcmp(e->key->chars, key->chars, key->length) == 0) {
+        if (value_equal(e->key, key)) {
             *out = e->value; return true;
         }
         idx = (idx + 1) & (m->capacity - 1);
@@ -198,16 +228,54 @@ void value_decref(Value v) {
 
 void obj_free(Obj* obj) {
     switch (obj->type) {
-    case OBJ_STRING:  { ObjString* s = (ObjString*)obj; tantrums_realloc(s->chars, s->capacity + 1, 0); } break;
-    case OBJ_LIST:    { ObjList* l = (ObjList*)obj;
-                        free(l->items); } break;
-    case OBJ_MAP:     { ObjMap* m = (ObjMap*)obj; free(m->entries); } break;
-    case OBJ_FUNCTION:{ ObjFunction* f = (ObjFunction*)obj;
-                        chunk_free(f->chunk); free(f->chunk); } break;
-    case OBJ_NATIVE:  break;
-    case OBJ_POINTER: break;
+    case OBJ_STRING: {
+        ObjString* s = (ObjString*)obj;
+        tantrums_realloc(s->chars, s->capacity + 1, 0);
+        tantrums_realloc(obj, sizeof(ObjString), 0);
+        break;
     }
-    free(obj);
+    case OBJ_POINTER: {
+        ObjPointer* p = (ObjPointer*)obj;
+        if (p->is_valid) {
+            tantrums_realloc(p->target, sizeof(Value), 0);
+        }
+        tantrums_realloc(obj, sizeof(ObjPointer), 0);
+        break;
+    }
+    case OBJ_FUNCTION: {
+        ObjFunction* f = (ObjFunction*)obj;
+        chunk_free(f->chunk);
+        tantrums_realloc(f->chunk, sizeof(Chunk), 0);
+        tantrums_realloc(obj, sizeof(ObjFunction), 0);
+        break;
+    }
+    case OBJ_NATIVE: {
+        tantrums_realloc(obj, sizeof(ObjNative), 0);
+        break;
+    }
+    case OBJ_LIST: {
+        ObjList* lst = (ObjList*)obj;
+        for (int i = 0; i < lst->count; i++) {
+             value_decref(lst->items[i]);
+        }
+        tantrums_realloc(lst->items, sizeof(Value) * lst->capacity, 0);
+        tantrums_realloc(obj, sizeof(ObjList), 0);
+        break;
+    }
+    case OBJ_MAP: {
+        ObjMap* map = (ObjMap*)obj;
+        for (int i = 0; i < map->capacity; i++) {
+             MapEntry* e = &map->entries[i];
+             if (!IS_NULL(e->key) || !IS_NULL(e->value)) {
+                 value_decref(e->key);
+                 value_decref(e->value);
+             }
+        }
+        tantrums_realloc(map->entries, sizeof(MapEntry) * map->capacity, 0);
+        tantrums_realloc(obj, sizeof(ObjMap), 0);
+        break;
+    }
+    }
 }
 
 /* ── Utilities ────────────────────────────────────── */

@@ -11,13 +11,13 @@ typedef enum {
     NODE_LIST_LIT, NODE_MAP_LIT,
     NODE_IDENTIFIER, NODE_UNARY, NODE_BINARY,
     NODE_ASSIGN, NODE_CALL, NODE_INDEX, NODE_INDEX_ASSIGN,
-    NODE_ALLOC,
+    NODE_ALLOC, NODE_POSTFIX,
 
     /* Statements */
     NODE_EXPR_STMT, NODE_VAR_DECL, NODE_BLOCK,
     NODE_IF, NODE_WHILE, NODE_FOR_IN,
     NODE_FUNC_DECL, NODE_RETURN, NODE_THROW, NODE_FREE,
-    NODE_USE, NODE_TRY_CATCH,
+    NODE_USE, NODE_TRY_CATCH, NODE_BREAK, NODE_CONTINUE,
     NODE_PROGRAM,
 } NodeType;
 
@@ -44,6 +44,7 @@ struct ASTNode {
         struct { ASTNode* object; ASTNode* index; }  index_access;    /* INDEX     */
         struct { ASTNode* object; ASTNode* index; ASTNode* value; } index_assign; /* INDEX_ASSIGN */
         struct { char* type_name; ASTNode* init; }   alloc_expr;      /* ALLOC     */
+        struct { TokenType op; ASTNode* operand; }   postfix;         /* POSTFIX   */
         struct { char* type_name; char* name; ASTNode* init; } var_decl; /* VAR_DECL */
         NodeList block;                                               /* BLOCK     */
         struct { ASTNode* cond; ASTNode* then_b; ASTNode* else_b; } if_stmt;  /* IF */

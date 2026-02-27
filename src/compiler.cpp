@@ -23,6 +23,19 @@ static CompilerState* current = nullptr;
 static bool had_type_error = false;
 static CompileMode compile_mode = MODE_BOTH;
 
+typedef struct Loop {
+    struct Loop* enclosing;
+    int start;
+    int scope_depth;
+    int type;  /* 0 = while, 1 = for_in */
+    int breaks[64];
+    int break_count;
+    int continues[64];
+    int continue_count;
+} Loop;
+
+static Loop* current_loop = nullptr;
+
 /* ── Global Tracking (for detecting duplicate definitions) ── */
 #define MAX_GLOBALS 512
 static char tracked_globals[MAX_GLOBALS][256];
@@ -170,11 +183,14 @@ static void check_call_types(ASTNode* call_node) {
     
     /* Skip builtin validation */
     if (strcmp(fn_name, "print") == 0 || strcmp(fn_name, "input") == 0 ||
-        strcmp(fn_name, "len") == 0 || strcmp(fn_name, "range") == 0 ||
-        strcmp(fn_name, "type") == 0 || strcmp(fn_name, "append") == 0 ||
-        strcmp(fn_name, "getCurrentTime") == 0 || strcmp(fn_name, "toSeconds") == 0 ||
-        strcmp(fn_name, "toMilliseconds") == 0 || strcmp(fn_name, "toMinutes") == 0 ||
-        strcmp(fn_name, "toHours") == 0) return;
+    strcmp(fn_name, "len") == 0 || strcmp(fn_name, "range") == 0 ||
+    strcmp(fn_name, "type") == 0 || strcmp(fn_name, "append") == 0 ||
+    strcmp(fn_name, "getCurrentTime") == 0 || strcmp(fn_name, "toSeconds") == 0 ||
+    strcmp(fn_name, "toMilliseconds") == 0 || strcmp(fn_name, "toMinutes") == 0 ||
+    strcmp(fn_name, "toHours") == 0 ||
+    strcmp(fn_name, "getProcessMemory") == 0 || strcmp(fn_name, "getVmMemory") == 0 ||
+    strcmp(fn_name, "getVmPeakMemory") == 0 || strcmp(fn_name, "bytesToKB") == 0 ||
+    strcmp(fn_name, "bytesToMB") == 0 || strcmp(fn_name, "bytesToGB") == 0) return;
 
     FuncSig* sig = find_func_sig(fn_name);
     if (!sig) {
@@ -243,7 +259,12 @@ static void end_scope(int line) {
     while (current->local_count > 0 &&
            current->locals[current->local_count - 1].depth > current->scope_depth) {
         Local* local = &current->locals[current->local_count - 1];
-        if (!local->is_used && local->name[0] != '\0' && memcmp(local->name, "$", 1) != 0) {
+        
+        bool is_param = (local->depth == 1 && current->function->name != nullptr);
+        bool is_in_loop = (local->depth >= 2);
+        bool is_hidden = (local->name[0] == '\0' || memcmp(local->name, "$", 1) == 0);
+
+        if (!local->is_used && current->function->name != nullptr && !is_hidden && !is_param && !is_in_loop) {
             fprintf(stderr, "[Line %d] Warning: Unused variable '%s'.\n", line, local->name);
         }
         emit_byte(line, OP_POP);
@@ -401,6 +422,91 @@ static void compile_expr(ASTNode* node) {
         emit_byte(node->line, OP_ALLOC);
         break;
 
+    case NODE_POSTFIX: {
+        bool is_inc = node->as.postfix.op == TOKEN_PLUS_PLUS;
+        if (node->as.postfix.operand->type == NODE_IDENTIFIER) {
+            int slot = resolve_local(current, node->as.postfix.operand->as.identifier.name, node->as.postfix.operand->as.identifier.length);
+            
+            /* 1. Put old value on stack */
+            compile_expr(node->as.postfix.operand);
+            
+            /* 2. Compute new value */
+            compile_expr(node->as.postfix.operand);
+            emit_constant(node->line, INT_VAL(1));
+            emit_byte(node->line, is_inc ? OP_ADD : OP_SUB);
+            
+            /* 3. Set (leaves new value on stack) */
+            if (slot != -1) {
+                emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
+            } else {
+                ObjString* name = obj_string_new(node->as.postfix.operand->as.identifier.name, node->as.postfix.operand->as.identifier.length);
+                emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
+            }
+            /* 4. Pop new value, leaving the OLD value generated in step 1 on top of the stack! */
+            emit_byte(node->line, OP_POP);
+        } else {
+            type_error(node->line, "Invalid operand for postfix operation.");
+            emit_byte(node->line, OP_NULL);
+        }
+    } break;
+
+    case NODE_ASSIGN: {
+        /* STATIC mode: error if assigning to undeclared (untyped) variable */
+        if (compile_mode == MODE_STATIC) {
+            int s = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
+            if (s == -1) {
+                char buf[512];
+                snprintf(buf, sizeof(buf),
+                         "Static mode: variable '%s' must be declared with a type (e.g., int %s = ...).",
+                         node->as.assign.name, node->as.assign.name);
+                type_error(node->line, buf);
+            }
+        }
+
+        /* Type check assignment to typed local (skip in DYNAMIC mode) */
+        if (compile_mode != MODE_DYNAMIC) {
+            int check_slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
+            if (check_slot != -1 && current->locals[check_slot].type_name[0]) {
+                const char* val_type = infer_expr_type(node->as.assign.value);
+                if (val_type && !types_compatible(current->locals[check_slot].type_name, val_type)) {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf),
+                             "Cannot assign '%s' value to '%s' variable '%s'.",
+                             val_type, current->locals[check_slot].type_name, node->as.assign.name);
+                    type_error(node->line, buf);
+                }
+            }
+        }
+        compile_expr(node->as.assign.value);
+        int slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
+        if (slot != -1) {
+            /* Reassign existing local — set, leaves copy on stack */
+            emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
+        } else if (current->scope_depth > 0) {
+            /* Inside a function: create a new local variable. */
+            int new_slot = add_local(node->as.assign.name, (int)strlen(node->as.assign.name));
+            emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)new_slot);
+        } else {
+            /* Top-level: create/update a global */
+            ObjString* name = obj_string_new(node->as.assign.name, (int)strlen(node->as.assign.name));
+            emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
+        }
+    } break;
+
+    case NODE_INDEX_ASSIGN: {
+        if (node->as.index_assign.index == nullptr) {
+            /* Pointer dereference assignment: *ptr = val */
+            compile_expr(node->as.index_assign.value);
+            compile_expr(node->as.index_assign.object);
+            emit_byte(node->line, OP_PTR_SET);
+        } else {
+            compile_expr(node->as.index_assign.object);
+            compile_expr(node->as.index_assign.index);
+            compile_expr(node->as.index_assign.value);
+            emit_byte(node->line, OP_INDEX_SET);
+        }
+    } break;
+
     default:
         fprintf(stderr, "[Line %d] Cannot compile expression of type %d\n", node->line, node->type);
         break;
@@ -463,7 +569,7 @@ static void compile_node(ASTNode* node) {
         } else {
             for (int i = current->local_count - 1; i >= 0; i--) {
                 Local* l = &current->locals[i];
-                if (l->depth < current->scope_depth) break; // Out of current scope layer
+                if (l->depth < current->scope_depth) break; // Out of current scope layer (only checked exact same scope)
                 if (l->length == (int)strlen(node->as.var_decl.name) &&
                     memcmp(l->name, node->as.var_decl.name, l->length) == 0) {
                     char buf[512];
@@ -492,10 +598,23 @@ static void compile_node(ASTNode* node) {
             compile_expr(node->as.var_decl.init);
         } else {
             /* Default Initialization based on type */
-            if (node->as.var_decl.type_name && strcmp(node->as.var_decl.type_name, "list") == 0) {
-                emit_bytes(node->line, OP_LIST_NEW, 0);
-            } else if (node->as.var_decl.type_name && strcmp(node->as.var_decl.type_name, "map") == 0) {
-                emit_bytes(node->line, OP_MAP_NEW, 0);
+            if (node->as.var_decl.type_name) {
+                if (strcmp(node->as.var_decl.type_name, "list") == 0) {
+                    emit_bytes(node->line, OP_LIST_NEW, 0);
+                } else if (strcmp(node->as.var_decl.type_name, "map") == 0) {
+                    emit_bytes(node->line, OP_MAP_NEW, 0);
+                } else if (strcmp(node->as.var_decl.type_name, "int") == 0) {
+                    emit_constant(node->line, INT_VAL(0));
+                } else if (strcmp(node->as.var_decl.type_name, "float") == 0) {
+                    emit_constant(node->line, FLOAT_VAL(0.0));
+                } else if (strcmp(node->as.var_decl.type_name, "bool") == 0) {
+                    emit_byte(node->line, OP_FALSE);
+                } else if (strcmp(node->as.var_decl.type_name, "string") == 0) {
+                    ObjString* empty_str = obj_string_new("", 0);
+                    emit_constant(node->line, OBJ_VAL(empty_str));
+                } else {
+                    emit_byte(node->line, OP_NULL);
+                }
             } else {
                 emit_byte(node->line, OP_NULL);
             }
@@ -522,51 +641,6 @@ static void compile_node(ASTNode* node) {
         }
     } break;
 
-    case NODE_ASSIGN: {
-        /* STATIC mode: error if assigning to undeclared (untyped) variable */
-        if (compile_mode == MODE_STATIC) {
-            int s = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
-            if (s == -1) {
-                char buf[512];
-                snprintf(buf, sizeof(buf),
-                         "Static mode: variable '%s' must be declared with a type (e.g., int %s = ...).",
-                         node->as.assign.name, node->as.assign.name);
-                type_error(node->line, buf);
-            }
-        }
-
-        /* Type check assignment to typed local (skip in DYNAMIC mode) */
-        if (compile_mode != MODE_DYNAMIC) {
-            int check_slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
-            if (check_slot != -1 && current->locals[check_slot].type_name[0]) {
-                const char* val_type = infer_expr_type(node->as.assign.value);
-                if (val_type && !types_compatible(current->locals[check_slot].type_name, val_type)) {
-                    char buf[512];
-                    snprintf(buf, sizeof(buf),
-                             "Cannot assign '%s' value to '%s' variable '%s'.",
-                             val_type, current->locals[check_slot].type_name, node->as.assign.name);
-                    type_error(node->line, buf);
-                }
-            }
-        }
-        compile_expr(node->as.assign.value);
-        int slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
-        if (slot != -1) {
-            /* Reassign existing local — set and pop the extra copy */
-            emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
-            emit_byte(node->line, OP_POP);
-        } else if (current->scope_depth > 0) {
-            /* Inside a function: create a new local variable.
-               The value is already on the stack — just register the name.
-               No POP needed because the value IS the local's slot. */
-            add_local(node->as.assign.name, (int)strlen(node->as.assign.name));
-        } else {
-            /* Top-level: create/update a global */
-            ObjString* name = obj_string_new(node->as.assign.name, (int)strlen(node->as.assign.name));
-            emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
-            emit_byte(node->line, OP_POP);
-        }
-    } break;
 
     case NODE_BLOCK:
         if (node->as.block.count == 0 && compile_mode != MODE_DYNAMIC) { /* Optional empty block warning */
@@ -598,20 +672,34 @@ static void compile_node(ASTNode* node) {
     } break;
 
     case NODE_WHILE: {
-        int loop_start = current_chunk()->count;
+        Loop loop;
+        loop.enclosing = current_loop;
+        loop.start = current_chunk()->count;
+        loop.scope_depth = current->scope_depth;
+        loop.type = 0;
+        loop.break_count = 0;
+        loop.continue_count = 0;
+        current_loop = &loop;
+
         compile_expr(node->as.while_stmt.cond);
         int exit_jump = emit_jump(node->line, OP_JUMP_IF_FALSE);
         emit_byte(node->line, OP_POP);
         compile_node(node->as.while_stmt.body);
-        emit_loop(node->line, loop_start);
+        emit_loop(node->line, loop.start);
         patch_jump(exit_jump);
         emit_byte(node->line, OP_POP);
+
+        for (int i = 0; i < loop.break_count; i++) {
+            patch_jump(loop.breaks[i]);
+        }
+        current_loop = loop.enclosing;
     } break;
 
     case NODE_FOR_IN: {
-        /* Compile iterable onto stack, then hidden counter */
+        /* Compile iterable onto stack, clone it, then hidden counter */
         begin_scope();
         compile_expr(node->as.for_in.iterable);
+        emit_byte(node->line, OP_CLONE);
         int iterable_slot = add_local("$iter", 5);
         emit_constant(node->line, INT_VAL(0));
         int counter_slot = add_local("$idx", 4);
@@ -635,10 +723,23 @@ static void compile_node(ASTNode* node) {
         emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)var_slot);
         emit_byte(node->line, OP_POP);
 
+        Loop loop;
+        loop.enclosing = current_loop;
+        loop.start = loop_start;
+        loop.scope_depth = current->scope_depth;
+        loop.type = 1;
+        loop.break_count = 0;
+        loop.continue_count = 0;
+        current_loop = &loop;
+
         /* Body */
         compile_node(node->as.for_in.body);
 
         /* counter++ */
+        for (int i = 0; i < loop.continue_count; i++) {
+            patch_jump(loop.continues[i]);
+        }
+
         emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)counter_slot);
         emit_constant(node->line, INT_VAL(1));
         emit_byte(node->line, OP_ADD);
@@ -648,6 +749,12 @@ static void compile_node(ASTNode* node) {
         emit_loop(node->line, loop_start);
         patch_jump(exit_jump);
         emit_byte(node->line, OP_POP);
+
+        for (int i = 0; i < loop.break_count; i++) {
+            patch_jump(loop.breaks[i]);
+        }
+
+        current_loop = loop.enclosing;
         end_scope(node->line);
     } break;
 
@@ -675,9 +782,7 @@ static void compile_node(ASTNode* node) {
         /* Compile body (it's a block, but don't add extra scope) */
         ASTNode* body = node->as.func_decl.body;
         bool has_return = has_guaranteed_return(body);
-        for (int i = 0; i < body->as.block.count; i++) {
-            compile_node(body->as.block.nodes[i]);
-        }
+        compile_node(body);
 
         /* Verify non-void function return */
         if (!has_return && node->as.func_decl.ret_type && 
@@ -727,19 +832,40 @@ static void compile_node(ASTNode* node) {
         emit_byte(node->line, OP_FREE);
         break;
 
-    case NODE_INDEX_ASSIGN: {
-        if (node->as.index_assign.index == nullptr) {
-            /* Pointer dereference assignment: *ptr = val */
-            compile_expr(node->as.index_assign.value);
-            compile_expr(node->as.index_assign.object);
-            emit_byte(node->line, OP_PTR_SET);
-        } else {
-            compile_expr(node->as.index_assign.object);
-            compile_expr(node->as.index_assign.index);
-            compile_expr(node->as.index_assign.value);
-            emit_byte(node->line, OP_INDEX_SET);
+    case NODE_BREAK:
+        if (current_loop == nullptr) {
+            type_error(node->line, "'break' used outside of loop.");
+            break;
         }
-    } break;
+        for (int i = current->local_count - 1; i >= 0 && current->locals[i].depth > current_loop->scope_depth; i--) {
+            emit_byte(node->line, OP_POP);
+        }
+        if (current_loop->break_count < 64) {
+            current_loop->breaks[current_loop->break_count++] = emit_jump(node->line, OP_JUMP);
+        } else {
+            type_error(node->line, "Too many breaks in loop.");
+        }
+        break;
+
+    case NODE_CONTINUE:
+        if (current_loop == nullptr) {
+            type_error(node->line, "'continue' used outside of loop.");
+            break;
+        }
+        for (int i = current->local_count - 1; i >= 0 && current->locals[i].depth > current_loop->scope_depth; i--) {
+            emit_byte(node->line, OP_POP);
+        }
+        if (current_loop->type == 0) { /* while loop */
+            emit_loop(node->line, current_loop->start);
+        } else { /* for_in loop, forward jump to continue target */
+            if (current_loop->continue_count < 64) {
+                current_loop->continues[current_loop->continue_count++] = emit_jump(node->line, OP_JUMP);
+            } else {
+                type_error(node->line, "Too many continues in loop.");
+            }
+        }
+        break;
+
 
     case NODE_PROGRAM:
         for (int i = 0; i < node->as.program.count; i++)
@@ -830,6 +956,7 @@ ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
     comp.enclosing = nullptr;
     comp.scope_depth = 0;
     current = &comp;
+    current_loop = nullptr;
 
     add_local("", 0); /* slot 0 reserved */
 

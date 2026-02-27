@@ -10,7 +10,7 @@ You do it by throwing a `tantrum`.
 If you want a strictly typed function with a clear return type:
 tantrum int add(int a, int b) 
 {
-    return a + b;
+    return (a + b);
 }
 
 If you want an untyped, dynamic function that just does things:
@@ -22,7 +22,7 @@ tantrum greet(string name)
 If you are running in dynamic mode or just don't care, drop the parameter types:
 tantrum multiply(a, b) 
 {
-    return a * b;
+    return (a * b);
 }
 
 You call them just like in any C-based language: `add(5, 10);`. 
@@ -82,6 +82,12 @@ Time APIs: `getCurrentTime()`, `toSeconds(ms)`, `toMinutes(ms)`, `toHours(ms)`
 `getCurrentTime()` dips into the C++ `<chrono>` library to return the raw 
 Unix Epoch system time explicitly in milliseconds. You can use the other 
 methods to format those gigantic integer deltas into human-readable floats.
+
+Memory APIs: `getProcessMemory()`, `getVmMemory()`, `getVmPeakMemory()`
+Returns `int` representing exact allocation metrics in bytes natively.
+
+Conversion APIs: `bytesToKB(b)`, `bytesToMB(b)`, `bytesToGB(b)`
+Returns strictly converted `float` mathematics instantly without string formatting overhead.
 
 LAUGHS & FACTS: THE CALL STACK & INPUT HACKS
 --------------------------------------------------------------------------------

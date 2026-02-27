@@ -34,7 +34,7 @@ struct Obj        { ObjType type; int refcount; bool is_manual; bool is_marked; 
 struct ObjString  { Obj obj; int length; int capacity; bool is_mutable; char* chars; uint32_t hash; };
 struct ObjList    { Obj obj; Value* items; int count; int capacity; };
 
-typedef struct { ObjString* key; Value value; bool occupied; } MapEntry;
+typedef struct { Value key; Value value; bool occupied; } MapEntry;
 struct ObjMap     { Obj obj; MapEntry* entries; int count; int capacity; };
 
 typedef Value (*NativeFn)(VM* vm, int arg_count, Value* args);
@@ -73,10 +73,11 @@ ObjString*   obj_string_clone_mutable(ObjString* a);
 void         obj_string_append(ObjString* a, const char* chars, int length);
 ObjString*   obj_string_concat(ObjString* a, ObjString* b);
 ObjList*     obj_list_new(void);
+ObjList*     obj_list_clone(ObjList* origin);
 void         obj_list_append(ObjList* list, Value value);
 ObjMap*      obj_map_new(void);
-bool         obj_map_set(ObjMap* map, ObjString* key, Value value);
-bool         obj_map_get(ObjMap* map, ObjString* key, Value* out);
+bool         obj_map_set(ObjMap* map, Value key, Value value);
+bool         obj_map_get(ObjMap* map, Value key, Value* out);
 ObjFunction* obj_function_new(void);
 ObjNative*   obj_native_new(NativeFn fn, const char* name);
 ObjPointer*  obj_pointer_new(Value* target);
@@ -87,6 +88,7 @@ void         value_print(Value v);
 bool         value_equal(Value a, Value b);
 const char*  value_type_name(Value v);
 uint32_t     hash_string(const char* key, int length);
+uint32_t     value_hash(Value v);
 
 extern Obj* all_objects;
 

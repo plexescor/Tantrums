@@ -68,8 +68,14 @@ static TokenType identifier_type(Lexer* l) {
         if (len == 5 && memcmp(l->start, "alloc", 5) == 0) return TOKEN_ALLOC;
         if (len == 3 && memcmp(l->start, "and", 3) == 0) return TOKEN_AND;
         break;
-    case 'b': return check_keyword(l, 1, 3, "ool", TOKEN_TYPE_BOOL);
-    case 'c': return check_keyword(l, 1, 4, "atch", TOKEN_CATCH);
+    case 'b':
+        if (len == 4 && memcmp(l->start, "bool", 4) == 0) return TOKEN_TYPE_BOOL;
+        if (len == 5 && memcmp(l->start, "break", 5) == 0) return TOKEN_BREAK;
+        break;
+    case 'c':
+        if (len == 5 && memcmp(l->start, "catch", 5) == 0) return TOKEN_CATCH;
+        if (len == 8 && memcmp(l->start, "continue", 8) == 0) return TOKEN_CONTINUE;
+        break;
     case 'e': return check_keyword(l, 1, 3, "lse", TOKEN_ELSE);
     case 'f':
         if (len > 1) {

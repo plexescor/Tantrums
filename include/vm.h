@@ -44,6 +44,6 @@ InterpretResult vm_interpret_compiled(VM* vm, ObjFunction* script);
 void            vm_push(VM* vm, Value value);
 Value           vm_pop(VM* vm);
 Value           vm_peek(VM* vm, int distance);
-void            vm_runtime_error(VM* vm, const char* fmt, ...);
+bool            vm_runtime_error(VM* vm, const char* fmt, ...);
 
 #endif

@@ -162,7 +162,8 @@ function lint(document) {
 
 var BUILTIN_FUNCS = {
     'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1,
-    'getCurrentTime': 1, 'toSeconds': 1, 'toMilliseconds': 1, 'toMinutes': 1, 'toHours': 1
+    'getCurrentTime': 1, 'toSeconds': 1, 'toMilliseconds': 1, 'toMinutes': 1, 'toHours': 1,
+    'getProcessMemory': 1, 'getVmMemory': 1, 'getVmPeakMemory': 1, 'bytesToKB': 1, 'bytesToMB': 1, 'bytesToGB': 1
 };
 var KEYWORDS = ['tantrum', 'if', 'else', 'while', 'for', 'in', 'return', 'throw', 'alloc',
     'free', 'use', 'and', 'or', 'true', 'false', 'null', 'try', 'catch',
@@ -424,6 +425,8 @@ function checkConditions(lines, diags) {
 function checkFunctionTypes(lines, funcSigs, diags) {
     var skip = {
         'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1,
+        'getCurrentTime': 1, 'toSeconds': 1, 'toMilliseconds': 1, 'toMinutes': 1, 'toHours': 1,
+        'getProcessMemory': 1, 'getVmMemory': 1, 'getVmPeakMemory': 1, 'bytesToKB': 1, 'bytesToMB': 1, 'bytesToGB': 1,
         'tantrum': 1, 'if': 1, 'while': 1, 'for': 1, 'catch': 1,
         'return': 1, 'throw': 1, 'alloc': 1, 'free': 1,
         'int': 1, 'float': 1, 'string': 1, 'bool': 1, 'list': 1, 'map': 1
@@ -562,6 +565,7 @@ function checkUndefinedFunctions(lines, funcSigs, diags) {
     var skip = {
         'print': 1, 'input': 1, 'len': 1, 'range': 1, 'type': 1, 'append': 1,
         'getCurrentTime': 1, 'toSeconds': 1, 'toMilliseconds': 1, 'toMinutes': 1, 'toHours': 1,
+        'getProcessMemory': 1, 'getVmMemory': 1, 'getVmPeakMemory': 1, 'bytesToKB': 1, 'bytesToMB': 1, 'bytesToGB': 1,
         'tantrum': 1, 'if': 1, 'while': 1, 'for': 1, 'catch': 1, 'alloc': 1, 'free': 1,
         'int': 1, 'float': 1, 'string': 1, 'bool': 1, 'list': 1, 'map': 1,
         'return': 1, 'throw': 1
@@ -595,6 +599,7 @@ function checkUndefinedVariables(lines, funcSigs, varDecls, diags) {
     var known = {};
     var builtinNames = ['print', 'input', 'len', 'range', 'type', 'append', 'true', 'false', 'null',
         'getCurrentTime', 'toSeconds', 'toMilliseconds', 'toMinutes', 'toHours',
+        'getProcessMemory', 'getVmMemory', 'getVmPeakMemory', 'bytesToKB', 'bytesToMB', 'bytesToGB',
         'tantrum', 'if', 'else', 'while', 'for', 'in', 'return', 'throw',
         'alloc', 'free', 'use', 'and', 'or', 'try', 'catch',
         'int', 'float', 'string', 'bool', 'list', 'map', 'main', 'i'];
@@ -825,7 +830,7 @@ function checkShadowBuiltins(lines, diags) {
     for (var i = 0; i < lines.length; i++) {
         var m = lines[i].match(declRe);
         if (!m) { continue; }
-        var name = m[2];
+        var name = m[1];
         if (builtins.indexOf(name) >= 0) {
             var col = lines[i].indexOf(name, lines[i].indexOf(m[1]) + m[1].length);
             diags.push(makeDiag(i, col, col + name.length,
@@ -887,7 +892,43 @@ var HOVER_DOCS = {
     'string': { sig: 'string', desc: '**String type.** UTF-8, escape sequences supported.' },
     'bool': { sig: 'bool', desc: '**Boolean type.** true or false.' },
     'list': { sig: 'list', desc: '**List type.** `list x = [1, 2, 3];`' },
-    'map': { sig: 'map', desc: '**Map type.** `map x = {"a": 1};`' }
+    'map': { sig: 'map', desc: '**Map type.** `map x = {"a": 1};`' },
+    'toMilliseconds': {
+        sig: 'toMilliseconds(delta_ms) -> int',
+        desc: 'Returns an integer parsing input milliseconds to ms.'
+    },
+    'toMinutes': {
+        sig: 'toMinutes(delta_ms) -> float',
+        desc: 'Returns a float parsing input milliseconds to minutes.'
+    },
+    'toHours': {
+        sig: 'toHours(delta_ms) -> float',
+        desc: 'Returns a float parsing input milliseconds to hours.'
+    },
+    'getProcessMemory': {
+        sig: 'getProcessMemory() -> int',
+        desc: 'Returns Resident Set Size (RSS) of the Tantrums process in bytes natively.'
+    },
+    'getVmMemory': {
+        sig: 'getVmMemory() -> int',
+        desc: 'Returns current Tantrums-managed heap usage in bytes.'
+    },
+    'getVmPeakMemory': {
+        sig: 'getVmPeakMemory() -> int',
+        desc: 'Returns highest observed value of VM allocations in bytes.'
+    },
+    'bytesToKB': {
+        sig: 'bytesToKB(bytes) -> float',
+        desc: 'Returns a float converting raw bytes to Kilobytes.'
+    },
+    'bytesToMB': {
+        sig: 'bytesToMB(bytes) -> float',
+        desc: 'Returns a float converting raw bytes to Megabytes.'
+    },
+    'bytesToGB': {
+        sig: 'bytesToGB(bytes) -> float',
+        desc: 'Returns a float converting raw bytes to Gigabytes.'
+    }
 };
 
 var MODE_INFO = {
@@ -953,7 +994,13 @@ function doComplete(doc, pos) {
         { name: 'toSeconds', insert: 'toSeconds(${1:delta_ms})', sig: 'toSeconds(delta_ms) -> float' },
         { name: 'toMilliseconds', insert: 'toMilliseconds(${1:delta_ms})', sig: 'toMilliseconds(delta_ms) -> int' },
         { name: 'toMinutes', insert: 'toMinutes(${1:delta_ms})', sig: 'toMinutes(delta_ms) -> float' },
-        { name: 'toHours', insert: 'toHours(${1:delta_ms})', sig: 'toHours(delta_ms) -> float' }
+        { name: 'toHours', insert: 'toHours(${1:delta_ms})', sig: 'toHours(delta_ms) -> float' },
+        { name: 'getProcessMemory', insert: 'getProcessMemory()', sig: 'getProcessMemory() -> int' },
+        { name: 'getVmMemory', insert: 'getVmMemory()', sig: 'getVmMemory() -> int' },
+        { name: 'getVmPeakMemory', insert: 'getVmPeakMemory()', sig: 'getVmPeakMemory() -> int' },
+        { name: 'bytesToKB', insert: 'bytesToKB(${1:bytes})', sig: 'bytesToKB(bytes) -> float' },
+        { name: 'bytesToMB', insert: 'bytesToMB(${1:bytes})', sig: 'bytesToMB(bytes) -> float' },
+        { name: 'bytesToGB', insert: 'bytesToGB(${1:bytes})', sig: 'bytesToGB(bytes) -> float' }
     ];
     for (var b = 0; b < builtins.length; b++) {
         var bi = new vscode.CompletionItem(builtins[b].name, vscode.CompletionItemKind.Function);

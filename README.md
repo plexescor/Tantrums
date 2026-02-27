@@ -141,7 +141,7 @@ Functions are declared with the `tantrum` keyword (yes, really).
 ```c
 tantrum int add(float a, float b)
 {
-    return a + b;
+    return (a + b);
 }
 
 tantrum greet(string name)
@@ -224,7 +224,7 @@ Split your code across files:
 // helper.42AHH
 tantrum int square(int n)
 {
-    return n * n;
+    return (n * n);
 }
 ```
 
@@ -245,7 +245,7 @@ When you use type annotations, the compiler enforces them:
 ```c
 tantrum int add(float a, float b)
 {
-    return a + b;
+    return (a + b);
 }
 
 tantrum main()

@@ -207,7 +207,7 @@
             "patterns": [
                 {
                     "name": "support.function.builtin.tantrums",
-                    "match": "\\b(print|input|len|range|type|append)\\b(?=\\s*\\()"
+                    "match": "\\b(print|input|len|range|type|append|getCurrentTime|toSeconds|toMilliseconds|toMinutes|toHours|getProcessMemory|getVmMemory|getVmPeakMemory|bytesToKB|bytesToMB|bytesToGB)\\b(?=\\s*\\()"
                 }
             ]
         },

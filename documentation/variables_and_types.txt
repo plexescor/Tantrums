@@ -115,6 +115,10 @@ LAUGHS & FACTS: THE STRING DEBACLE
   literal. It's incredibly fast because there's absolutely no introspection or 
   reflection happening. 
 
+- Map dictionary keys are now strictly typed! A map key is evaluated natively as 
+  a full `Value` struct. `1` and `"1"` are completely different keys. Tantrums 
+  escapes the JavaScript nightmare of implicit string coercion for dictionary keys.
+
 - You can create nested lists and maps forever. `[[1, 2], {"nested": [4, 5]}]` 
   is totally valid. The compiler doesn't care until you blow the stack or run 
   out of RAM. Recursion is fun!

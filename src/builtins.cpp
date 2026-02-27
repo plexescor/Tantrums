@@ -1,7 +1,19 @@
 #include "builtins.h"
+#include "memory.h"
 #include <cstdio>
 #include <cstring>
 #include <chrono>
+
+#if defined(_WIN32)
+#include <windows.h>
+#include <psapi.h>
+#elif defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/task.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#include <stdio.h>
+#endif
 
 /* print(x) — prints value followed by newline */
 static Value native_print(VM* vm, int argc, Value* args) {
@@ -134,6 +146,69 @@ static Value native_toHours(VM* vm, int argc, Value* args) {
     return FLOAT_VAL((double)AS_INT(args[0]) / 3600000.0);
 }
 
+/* ── Memory API ────────────────────────────────────── */
+
+/* getProcessMemory() -> int */
+static Value native_getProcessMemory(VM* vm, int argc, Value* args) {
+    (void)vm; (void)argc; (void)args;
+    size_t mem = 0;
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+        mem = pmc.WorkingSetSize;
+    }
+#elif defined(__APPLE__)
+    struct mach_task_basic_info info;
+    mach_msg_type_number_t infoCount = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO, (task_info_t)&info, &infoCount) == KERN_SUCCESS) {
+        mem = (size_t)info.resident_size;
+    }
+#elif defined(__linux__)
+    long rss = 0L;
+    FILE* fp = NULL;
+    if ((fp = fopen("/proc/self/statm", "r")) != NULL) {
+        if (fscanf(fp, "%*s%ld", &rss) == 1) {
+            mem = (size_t)rss * (size_t)sysconf(_SC_PAGESIZE);
+        }
+        fclose(fp);
+    }
+#endif
+    return INT_VAL((int64_t)mem);
+}
+
+/* getVmMemory() -> int */
+static Value native_getVmMemory(VM* vm, int argc, Value* args) {
+    (void)vm; (void)argc; (void)args;
+    return INT_VAL((int64_t)tantrums_bytes_allocated);
+}
+
+/* getVmPeakMemory() -> int */
+static Value native_getVmPeakMemory(VM* vm, int argc, Value* args) {
+    (void)vm; (void)argc; (void)args;
+    return INT_VAL((int64_t)tantrums_peak_bytes_allocated);
+}
+
+/* bytesToKB(bytes) -> float */
+static Value native_bytesToKB(VM* vm, int argc, Value* args) {
+    (void)vm;
+    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
+    return FLOAT_VAL((double)AS_INT(args[0]) / 1024.0);
+}
+
+/* bytesToMB(bytes) -> float */
+static Value native_bytesToMB(VM* vm, int argc, Value* args) {
+    (void)vm;
+    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
+    return FLOAT_VAL((double)AS_INT(args[0]) / (1024.0 * 1024.0));
+}
+
+/* bytesToGB(bytes) -> float */
+static Value native_bytesToGB(VM* vm, int argc, Value* args) {
+    (void)vm;
+    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
+    return FLOAT_VAL((double)AS_INT(args[0]) / (1024.0 * 1024.0 * 1024.0));
+}
+
 static void define_native(VM* vm, const char* name, NativeFn fn);
 
 void builtins_register(VM* vm) {
@@ -150,6 +225,14 @@ void builtins_register(VM* vm) {
     define_native(vm, "toMilliseconds", native_toMilliseconds);
     define_native(vm, "toMinutes",      native_toMinutes);
     define_native(vm, "toHours",        native_toHours);
+    
+    // Memory API
+    define_native(vm, "getProcessMemory", native_getProcessMemory);
+    define_native(vm, "getVmMemory",      native_getVmMemory);
+    define_native(vm, "getVmPeakMemory",  native_getVmPeakMemory);
+    define_native(vm, "bytesToKB",        native_bytesToKB);
+    define_native(vm, "bytesToMB",        native_bytesToMB);
+    define_native(vm, "bytesToGB",        native_bytesToGB);
 }
 
 static void define_native(VM* vm, const char* name, NativeFn fn) {

@@ -4,6 +4,7 @@
 #include "value.h"
 
 extern size_t tantrums_bytes_allocated;
+extern size_t tantrums_peak_bytes_allocated;
 extern size_t tantrums_next_gc;
 
 #define DEBUG_LOG_GC 0
