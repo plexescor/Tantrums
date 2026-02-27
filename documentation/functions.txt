@@ -1,0 +1,128 @@
+================================================================================
+                           FUNCTIONS IN TANTRUMS
+================================================================================
+
+BASIC INFO: THROWING A TANTRUM
+--------------------------------------------------------------------------------
+In Tantrums, you do not declare a function with `func`, `fn`, `def`, or `void`. 
+You do it by throwing a `tantrum`. 
+
+If you want a strictly typed function with a clear return type:
+tantrum int add(int a, int b) 
+{
+    return a + b;
+}
+
+If you want an untyped, dynamic function that just does things:
+tantrum greet(string name) 
+{
+    print("Hello " + name);
+}
+
+If you are running in dynamic mode or just don't care, drop the parameter types:
+tantrum multiply(a, b) 
+{
+    return a * b;
+}
+
+You call them just like in any C-based language: `add(5, 10);`. 
+The `main()` function is implicitly required at the entry-file level. The VM 
+searches for `main()` and kicks off execution there.
+
+ADVANCED INFO: IMPORTS (MODULES & FILES)
+--------------------------------------------------------------------------------
+You can split your code across multiple files using the `use` keyword. It 
+functions similarly to `#include` in C++ or `import` in Python. 
+
+Example:
+use helper.42AHH;
+
+This statement reads `helper.42AHH`, compiles it, and pushes its global 
+variables and functions into the current scope. It imports *everything*. There 
+is no namespace isolation yet, so if `helper.42AHH` defines a function `do_math()`, 
+you can just call `do_math()` directly in your file. 
+
+Duplicate imports are ignored automatically. The compiler maintains a list of 
+resolved file paths. If you `use utils.42AHH` and `utils.42AHH` also contains 
+`use math.42AHH`, the compiler won't loop infinitely. It just says, "Hey, I 
+already loaded that," and skips the duplicate load. Feel free to `use` your 
+files in an infinite tangled spaghetti web. The compiler handles it.
+
+NOTE: Currently, imported files MUST be in the same directory as the main file, 
+or you must provide relative paths properly. The module resolution isn't very 
+smart yet. It literally relies on C++ `std::ifstream` relative directories.
+
+ADVANCED INFO: BUILT-IN FUNCTIONS
+--------------------------------------------------------------------------------
+Tantrums provides an array of native functions built directly into the VM in C++.
+These do not require an import. They are always available.
+
+`print(x)`
+Prints output to the standard C++ output buffer (`std::cout`). It automatically 
+formats lists as `[1, 2, 3]` and maps as `{"key": "value"}`.
+
+`len(x)`
+Returns the length of a string, list, or map in O(1) time. Since we swapped 
+strings to a dynamic buffer recently, `len()` on strings is incredibly fast.
+
+`type(x)`
+Returns the type name of the passed variable as a string (e.g., `"int"`, 
+`"list"`, `"bool"`). Useful for dynamic type checking.
+
+`append(list, value)`
+Mutates a list directly by appending a value. Since lists are dynamic block 
+arrays, this triggers amortized geometric capacity doubling behind the scenes 
+so you don't stall the thread.
+
+`input("prompt")`
+Reads a line of standard input from the user. It halts the execution thread 
+until the user presses Enter.
+
+Time APIs: `getCurrentTime()`, `toSeconds(ms)`, `toMinutes(ms)`, `toHours(ms)`
+`getCurrentTime()` dips into the C++ `<chrono>` library to return the raw 
+Unix Epoch system time explicitly in milliseconds. You can use the other 
+methods to format those gigantic integer deltas into human-readable floats.
+
+LAUGHS & FACTS: THE CALL STACK & INPUT HACKS
+--------------------------------------------------------------------------------
+- Every function call initiates a Call Frame structure in the VM. Our call 
+  stack is pre-allocated with a flat array of frames (usually capped at 64 or 
+  256 deep, UPDATED: its 16384 frames). If you write a massive recursive function without a base case, 
+  the virtual machine will panic with a "Stack Overflow" rather than crashing 
+  the host operating system. Safe and cozy!
+
+- `input("prompt")` is hilariously smart. The return type magically depends on
+  what variable you are assigning it to!
+  
+  `int n = input("Enter num: ");`
+  This actually parses the user's input as an integer automatically. It runs 
+  C++'s `std::stoi()` under the hood. If the user types "hello", no promises 
+  on what happens to the VM though.
+  
+  `bool b = input("Yes? ");`
+  The boolean input string parsing logic is legendary. If the user types "true", 
+  it returns true. If they type literally ANY letter or digit, it returns true. 
+  If they hit Enter blindly, type tabs, or spaces, it returns false. The VM 
+  just assumes that if you didn't type text, you meant 'false'. It's lazy user 
+  input validation taken to the extreme.
+
+- Missing `main()`? The Lexer and Parser do not actually care if you have a 
+  `main()` function. They will compile arbitrary scripts hanging in global space. 
+  But the VM execution wrapper insists that it needs to call `main()`. So without 
+  it, the bytecode compiles successfully and then the VM finishes execution in 
+  -1 milliseconds without failing. We had to build a specific warning into the 
+  VS Code extension that screams `NO MAIN FUNC missing wrapper detection` because 
+  users kept complaining their code wasn't running.
+
+- There is currently no `return` optimization for tail-recursive functions. If 
+  you try to calculate the 1000th Fibonacci sequence number using pure recursion, 
+  the compiler will try its best, create massive call frames, push variables, 
+  and explode. Use loops. 
+
+- You can't declare anonymous functions or lambdas yet. The parser wasn't 
+  designed to handle unnamed `tantrum` blocks, so every function needs an 
+  explicit token identifier. Functional programming fans are out of luck.
+
+================================================================================
+END OF FUNCTIONS. GO THROW A TANTRUM.
+================================================================================

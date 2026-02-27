@@ -8,10 +8,6 @@
 Obj* all_objects = nullptr;
 
 static Obj* allocate_obj(size_t size, ObjType type) {
-    tantrums_bytes_allocated += size;
-    if (tantrums_bytes_allocated > tantrums_next_gc) {
-        tantrums_gc_collect();
-    }
     Obj* obj = (Obj*)malloc(size);
     obj->type = type;
     obj->refcount = 1;
@@ -22,11 +18,6 @@ static Obj* allocate_obj(size_t size, ObjType type) {
     return obj;
 }
 
-/* ── String interning table (O(1) Hash Set) ───────── */
-ObjString** intern_table = nullptr;
-int intern_count = 0;
-int intern_cap = 0;
-
 uint32_t hash_string(const char* key, int length) {
     uint32_t h = 2166136261u;
     for (int i = 0; i < length; i++) {
@@ -36,87 +27,65 @@ uint32_t hash_string(const char* key, int length) {
     return h;
 }
 
-static void intern_table_grow() {
-    int new_cap = intern_cap == 0 ? 1024 : intern_cap * 2;
-    ObjString** new_table = (ObjString**)calloc(new_cap, sizeof(ObjString*));
-    
-    for (int i = 0; i < intern_cap; i++) {
-        ObjString* s = intern_table[i];
-        if (!s) continue;
-        
-        uint32_t idx = s->hash & (new_cap - 1);
-        for (;;) {
-            if (!new_table[idx]) {
-                new_table[idx] = s;
-                break;
-            }
-            idx = (idx + 1) & (new_cap - 1);
-        }
-    }
-    
-    free(intern_table);
-    intern_table = new_table;
-    intern_cap = new_cap;
-}
-
 ObjString* obj_string_new(const char* chars, int length) {
     uint32_t h = hash_string(chars, length);
-    
-    /* Check intern table linearly resolving collisions */
-    if (intern_cap > 0) {
-        uint32_t idx = h & (intern_cap - 1);
-        for (;;) {
-            ObjString* s = intern_table[idx];
-            if (!s) break; // Slot empty, it doesn't exist
-            if (s->length == length && s->hash == h && memcmp(s->chars, chars, length) == 0) {
-                s->obj.refcount++; 
-                return s; 
-            }
-            idx = (idx + 1) & (intern_cap - 1);
-        }
-    }
     
     /* Create new string */
     ObjString* s = (ObjString*)allocate_obj(sizeof(ObjString), OBJ_STRING);
     s->obj.is_manual = true;
     s->length = length;
-    tantrums_bytes_allocated += length + 1;
-    if (tantrums_bytes_allocated > tantrums_next_gc) { tantrums_gc_collect(); }
-    s->chars = (char*)malloc(length + 1);
+    s->capacity = length;
+    s->is_mutable = false;
+    
+    // Allocate memory through gc-tracked realloc
+    s->chars = (char*)tantrums_realloc(nullptr, 0, length + 1);
     memcpy(s->chars, chars, length);
     s->chars[length] = '\0';
     s->hash = h;
     s->obj.is_manual = false;
     
-    /* Insert into intern table */
-    if (intern_count + 1 > intern_cap * 0.75) {
-        intern_table_grow();
-    }
-    
-    uint32_t idx = h & (intern_cap - 1);
-    for (;;) {
-        if (!intern_table[idx]) {
-            intern_table[idx] = s;
-            intern_count++;
-            break;
-        }
-        idx = (idx + 1) & (intern_cap - 1);
-    }
-    
     return s;
 }
 
-ObjString* obj_string_concat(ObjString* a, ObjString* b) {
-    int len = a->length + b->length;
-    char* buf = (char*)malloc(len + 1);
-    memcpy(buf, a->chars, a->length);
-    memcpy(buf + a->length, b->chars, b->length);
-    buf[len] = '\0';
-    ObjString* r = obj_string_new(buf, len);
-    free(buf);
+ObjString* obj_string_clone_mutable(ObjString* a) {
+    ObjString* r = obj_string_new(a->chars, a->length);
+    r->is_mutable = true;
     return r;
 }
 
+void obj_string_append(ObjString* a, const char* chars, int length) {
+    if (a->length + length > a->capacity) {
+        int old_cap = a->capacity;
+        int new_cap = old_cap < 8 ? 8 : old_cap * 2;
+        while (new_cap < a->length + length) new_cap *= 2;
+        a->chars = (char*)tantrums_realloc(a->chars, old_cap + 1, new_cap + 1);
+        a->capacity = new_cap;
+    }
+    
+    memcpy(a->chars + a->length, chars, length);
+    
+    /* Incrementally calculate FNV-1a hash */
+    for (int i = 0; i < length; i++) {
+        a->hash ^= (uint8_t)chars[i];
+        a->hash *= 16777619u;
+    }
+    
+    a->length += length;
+    a->chars[a->length] = '\0';
+}
+
+ObjString* obj_string_concat(ObjString* a, ObjString* b) {
+    if (a->is_mutable) {
+        obj_string_append(a, b->chars, b->length);
+        a->obj.refcount++; // Concatenation on stack gives another reference to a
+        return a;
+    }
+    ObjString* r = obj_string_clone_mutable(a);
+    r->obj.is_manual = true;
+    obj_string_append(r, b->chars, b->length);
+    r->obj.is_manual = false;
+    return r;
+}
 /* ── List ─────────────────────────────────────────── */
 ObjList* obj_list_new(void) {
     ObjList* l = (ObjList*)allocate_obj(sizeof(ObjList), OBJ_LIST);
@@ -229,7 +198,7 @@ void value_decref(Value v) {
 
 void obj_free(Obj* obj) {
     switch (obj->type) {
-    case OBJ_STRING:  { ObjString* s = (ObjString*)obj; free(s->chars); } break;
+    case OBJ_STRING:  { ObjString* s = (ObjString*)obj; tantrums_realloc(s->chars, s->capacity + 1, 0); } break;
     case OBJ_LIST:    { ObjList* l = (ObjList*)obj;
                         free(l->items); } break;
     case OBJ_MAP:     { ObjMap* m = (ObjMap*)obj; free(m->entries); } break;
@@ -282,7 +251,17 @@ bool value_equal(Value a, Value b) {
     case VAL_FLOAT: return AS_FLOAT(a) == AS_FLOAT(b);
     case VAL_BOOL:  return AS_BOOL(a) == AS_BOOL(b);
     case VAL_NULL:  return true;
-    case VAL_OBJ:   return AS_OBJ(a) == AS_OBJ(b);
+    case VAL_OBJ:   {
+        if (AS_OBJ(a) == AS_OBJ(b)) return true;
+        if (OBJ_TYPE(a) != OBJ_TYPE(b)) return false;
+        if (IS_STRING(a)) {
+            ObjString* sa = AS_STRING(a);
+            ObjString* sb = AS_STRING(b);
+            if (sa->length != sb->length) return false;
+            return memcmp(sa->chars, sb->chars, sa->length) == 0;
+        }
+        return false;
+    }
     }
     return false;
 }

@@ -1,0 +1,122 @@
+================================================================================
+                      MEMORY & ERRORS IN TANTRUMS
+================================================================================
+
+BASIC INFO: A TALE OF TWO MEMORY MANAGERS
+--------------------------------------------------------------------------------
+Memory management in Tantrums is completely dual-mode. It was designed to cater 
+to both Python developers who are terrified of Segfaults, and hardcore C coders 
+who demand total control over the heap allocator.
+
+1. AUTOMATIC MEMORY (DEFAULT)
+By default, you have completely automatic memory management via Reference 
+Counting and a Cycle Collector.
+When you write `items = [1, 2, 3];`, Tantrums dynamically allocates memory on 
+the heap for the list structure. When the `items` variable goes out of scope 
+(like when the function returns), the reference count drops to 0, and the VM 
+automatically sweeps the memory clean. You never have to think about `malloc` 
+or `free`. 
+
+2. MANUAL MEMORY (OPT-IN)
+If you inherently distrust the garbage collector, you can opt-in to manual memory 
+management using the `alloc` and `free` keywords. 
+
+x = alloc int(42);
+print(*x);
+free x;
+
+In this mode, Tantrums trusts you completely. If you forget to `free x;`, that 
+memory belongs to the void indefinitely.
+
+ADVANCED INFO: SAFE POINTERS
+--------------------------------------------------------------------------------
+Because we cater to manual memory management, we had to implement pointers. 
+You can use the address-of operator (`&`) to get the memory address of a value, 
+and the dereference operator (`*`) to retrieve the value.
+
+p = &x;
+print(*p);
+*p = 20;
+
+However, we did not want the pure, unfiltered terror of C pointers. In C, a 
+rogue pointer will overwrite another application's memory or cause a colossal 
+Segmentation Fault that crashes the entire host process without leaving a trace.
+
+In Tantrums, pointers are bounds-checked and type-safe.
+If you try to dereference a null pointer (`*p` when `p` is null), the Tantrums 
+VM detects it. Instead of crashing, it catches the error internally, halts 
+execution safely, and prints a beautiful "Null Pointer Dereference Failed" error 
+message to the terminal.
+
+Furthermore, pointer arithmetic is aggressively banned. You cannot write `p + 5` 
+to jump forward 5 memory addresses to see what is living on the heap. We refuse 
+to let you hack the internal state of the VM.
+
+ADVANCED INFO: ERROR HANDLING AND EXCEPTIONS
+--------------------------------------------------------------------------------
+Writing perfect code is impossible. When things inevitably break, Tantrums 
+provides a robust exception handling model using strings.
+
+You can halt execution and raise a manual panic state using the `throw` keyword:
+
+throw "Something went wrong! I tried dividing by zero!";
+
+When a `throw` statement executes, the VM unwinds the call stack searching for 
+a `catch` block. If it doesn't find one, the VM prints your string and exits.
+
+To intercept a thrown error, you wrap risky operations in `try / catch` blocks:
+
+try 
+{
+    // risky code
+    throw "Oops, a bug!";
+} 
+catch (e) 
+{
+    print("Caught error: " + e);
+}
+
+The variable `e` catches the string that was thrown. What if you literally do 
+not care what the error was? Tantrums lets you completely drop the error 
+variable. This allows you to aggressively suppress all runtime failures:
+
+try { throw "fail"; } catch { print("We failed. Moving on anyway."); }
+
+This is affectionately known as the "Burying Your Head in the Sand" pattern.
+
+LAUGHS & FACTS: THE CHAOS OF VM PANICS
+--------------------------------------------------------------------------------
+- Why do we `throw` strings instead of sophisticated `Exception` objects like 
+  Java or Python? Because instantiating `Exception` instances deep in the C++ 
+  AST interpreter was annoying, and serializing exceptions down the call stack 
+  was too complex to implement in the bytecode runner. So the developers just 
+  said, "Screw it, let's just throw raw strings." It works surprisingly well!
+
+- The Cycle Collector was not originally planned. Early in development, the VM 
+  used simple reference counting. But if you created a list that contained a 
+  reference to itself (`list A = [A]`), the reference count would never hit 0, 
+  and the memory would leak infinitely. Our test script generated a self-
+  referencing map inside a `while (true)` loop and instantly consumed 32GB (16GB system + 16GB page file) of 
+  system RAM, forcing a hard system reboot. The Cycle Collector was patched in 
+  shortly after.
+
+- If you divide an integer by zero as a raw literal (`x / 0`), the semantic 
+  analyzer catches it and throws a compile-time error! But if you divide by a 
+  variable that evaluates to zero at runtime (`y = 0; x / y`), the VM catches 
+  the division, suppresses the C++ `Floating point exception (core dumped)` OS 
+  level crash, and correctly unwinds the Tantrums stack.
+
+- If you accidentally `free` the same variable twice (double free), the VM 
+  won't crash the host OS. It intercepts the double free check using an inner 
+  tracker map, points out your mistake via a console error, and shuts down 
+  the script. Safe pointers!
+
+- The `catch` block mechanism uses a stack of `TryCatchRecord` constructs inside 
+  the VM context. When an error is thrown, the VM instruction pointer (`IP`) 
+  literally teleports back to the `catch` block offset recorded during the `try` 
+  setup. It's essentially a glorified `goto` statement pretending to be an 
+  elegant control flow architecture.
+
+================================================================================
+END OF MEMORY & ERRORS. MAY YOU NEVER SEGFAULT IN TANTRUMS.
+================================================================================

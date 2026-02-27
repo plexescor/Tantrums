@@ -139,37 +139,57 @@ static InterpretResult run(VM* vm) {
         case OP_FALSE: vm_push(vm, BOOL_VAL(false)); break;
 
         case OP_ADD: {
-            Value b = vm_pop(vm), a = vm_pop(vm);
+            Value b = vm_peek(vm, 0);
+            Value a = vm_peek(vm, 1);
             if (IS_STRING(a) && IS_STRING(b)) {
-                vm_push(vm, OBJ_VAL(obj_string_concat(AS_STRING(a), AS_STRING(b))));
+                Value res = OBJ_VAL(obj_string_concat(AS_STRING(a), AS_STRING(b)));
+                vm->stack_top -= 2;
+                vm_push(vm, res);
             } else if (IS_STRING(a) || IS_STRING(b)) {
                 /* Auto-convert non-string side to string */
                 char buf[128];
-                ObjString* sa;
-                ObjString* sb;
-                if (IS_STRING(a)) { sa = AS_STRING(a); } else {
+                ObjString* sa = nullptr;
+                ObjString* sb = nullptr;
+                if (!IS_STRING(a)) {
                     if (IS_INT(a)) snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(a));
                     else if (IS_FLOAT(a)) snprintf(buf, sizeof(buf), "%g", AS_FLOAT(a));
                     else if (IS_BOOL(a)) snprintf(buf, sizeof(buf), "%s", AS_BOOL(a) ? "true" : "false");
                     else snprintf(buf, sizeof(buf), "null");
                     sa = obj_string_new(buf, (int)strlen(buf));
+                    sa->obj.is_manual = true; // Protect sa
+                } else {
+                    sa = AS_STRING(a);
                 }
-                if (IS_STRING(b)) { sb = AS_STRING(b); } else {
+                
+                if (!IS_STRING(b)) {
                     if (IS_INT(b)) snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(b));
                     else if (IS_FLOAT(b)) snprintf(buf, sizeof(buf), "%g", AS_FLOAT(b));
                     else if (IS_BOOL(b)) snprintf(buf, sizeof(buf), "%s", AS_BOOL(b) ? "true" : "false");
                     else snprintf(buf, sizeof(buf), "null");
                     sb = obj_string_new(buf, (int)strlen(buf));
+                } else {
+                    sb = AS_STRING(b);
                 }
-                vm_push(vm, OBJ_VAL(obj_string_concat(sa, sb)));
+                
+                Value res = OBJ_VAL(obj_string_concat(sa, sb));
+                
+                if (!IS_STRING(a)) sa->obj.is_manual = false; // Unprotect sa
+                
+                vm->stack_top -= 2;
+                vm_push(vm, res);
             } else if (IS_LIST(a) && IS_LIST(b)) {
-                ObjList* result = obj_list_new();
+                ObjList* result = obj_list_new(); // result is not on stack yet, protect
+                result->obj.is_manual = true;
                 ObjList* la = AS_LIST(a); ObjList* lb = AS_LIST(b);
                 for (int i = 0; i < la->count; i++) obj_list_append(result, la->items[i]);
                 for (int i = 0; i < lb->count; i++) obj_list_append(result, lb->items[i]);
+                result->obj.is_manual = false;
+                vm->stack_top -= 2;
                 vm_push(vm, OBJ_VAL(result));
             } else {
-                vm_push(vm, num_add(a, b));
+                Value res = num_add(a, b);
+                vm->stack_top -= 2;
+                vm_push(vm, res);
             }
         } break;
         case OP_SUB: { Value b = vm_pop(vm), a = vm_pop(vm); vm_push(vm, num_sub(a, b)); } break;
@@ -235,8 +255,10 @@ static InterpretResult run(VM* vm) {
         case OP_LIST_NEW: {
             int count = READ_BYTE();
             ObjList* list = obj_list_new();
+            list->obj.is_manual = true;
             for (int i = count - 1; i >= 0; i--)
                 obj_list_append(list, vm_peek(vm, i));
+            list->obj.is_manual = false;
             vm->stack_top -= count;
             vm_push(vm, OBJ_VAL(list));
         } break;
@@ -244,28 +266,31 @@ static InterpretResult run(VM* vm) {
         case OP_MAP_NEW: {
             int count = READ_BYTE();
             ObjMap* map = obj_map_new();
+            map->obj.is_manual = true;
             for (int i = count - 1; i >= 0; i--) {
                 Value val = vm_peek(vm, i * 2);
                 Value key = vm_peek(vm, i * 2 + 1);
                 if (IS_STRING(key)) obj_map_set(map, AS_STRING(key), val);
             }
+            map->obj.is_manual = false;
             vm->stack_top -= count * 2;
             vm_push(vm, OBJ_VAL(map));
         } break;
 
         case OP_INDEX_GET: {
-            Value idx = vm_pop(vm);
-            Value obj = vm_pop(vm);
+            Value idx = vm_peek(vm, 0);
+            Value obj = vm_peek(vm, 1);
+            Value result = NULL_VAL;
             if (IS_LIST(obj) && IS_INT(idx)) {
                 ObjList* l = AS_LIST(obj);
                 int i = (int)AS_INT(idx);
-                if (i < 0 || i >= l->count) { vm_push(vm, NULL_VAL); }
-                else vm_push(vm, l->items[i]);
+                if (i < 0 || i >= l->count) { result = NULL_VAL; }
+                else result = l->items[i];
             } else if (IS_STRING(obj) && IS_INT(idx)) {
                 ObjString* s = AS_STRING(obj);
                 int i = (int)AS_INT(idx);
-                if (i < 0 || i >= s->length) { vm_push(vm, NULL_VAL); }
-                else vm_push(vm, OBJ_VAL(obj_string_new(&s->chars[i], 1)));
+                if (i < 0 || i >= s->length) { result = NULL_VAL; }
+                else result = OBJ_VAL(obj_string_new(&s->chars[i], 1));
             } else if (IS_MAP(obj)) {
                 ObjString* s_idx = nullptr;
                 if (IS_STRING(idx)) {
@@ -276,9 +301,8 @@ static InterpretResult run(VM* vm) {
                     s_idx = obj_string_new(buf, (int)strlen(buf));
                 }
                 if (s_idx) {
-                    Value val;
-                    if (obj_map_get(AS_MAP(obj), s_idx, &val)) vm_push(vm, val);
-                    else vm_push(vm, NULL_VAL);
+                    if (obj_map_get(AS_MAP(obj), s_idx, &result)) {}
+                    else result = NULL_VAL;
                 } else {
                     vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
                     return INTERPRET_RUNTIME_ERROR;
@@ -287,12 +311,14 @@ static InterpretResult run(VM* vm) {
                 vm_runtime_error(vm, "Cannot index %s with %s.", value_type_name(obj), value_type_name(idx));
                 return INTERPRET_RUNTIME_ERROR;
             }
+            vm->stack_top -= 2;
+            vm_push(vm, result);
         } break;
 
         case OP_INDEX_SET: {
-            Value val = vm_pop(vm);
-            Value idx = vm_pop(vm);
-            Value obj = vm_pop(vm);
+            Value val = vm_peek(vm, 0);
+            Value idx = vm_peek(vm, 1);
+            Value obj = vm_peek(vm, 2);
             if (IS_LIST(obj) && IS_INT(idx)) {
                 ObjList* l = AS_LIST(obj);
                 int i = (int)AS_INT(idx);
@@ -313,6 +339,7 @@ static InterpretResult run(VM* vm) {
                     return INTERPRET_RUNTIME_ERROR;
                 }
             }
+            vm->stack_top -= 3;
         } break;
 
         case OP_PRINT: { value_print(vm_pop(vm)); printf("\n"); } break;
@@ -326,12 +353,13 @@ static InterpretResult run(VM* vm) {
         } break;
 
         case OP_ALLOC: {
-            Value v = vm_pop(vm);
+            Value v = vm_peek(vm, 0);
             /* Wrap in a pointer — manual memory */
             Value* heap = (Value*)malloc(sizeof(Value));
             *heap = v;
             ObjPointer* ptr = obj_pointer_new(heap);
             ptr->obj.is_manual = true;
+            vm->stack_top -= 1;
             vm_push(vm, OBJ_VAL(ptr));
         } break;
 
@@ -385,59 +413,56 @@ static InterpretResult run(VM* vm) {
 
         case OP_CAST: {
             uint8_t tag = READ_BYTE(); /* 0=int, 1=float, 2=string, 3=bool */
-            Value v = vm_pop(vm);
+            Value v = vm_peek(vm, 0);
+            Value result = NULL_VAL;
             switch (tag) {
             case 0: /* cast to int */ {
-                if (IS_INT(v)) { vm_push(vm, v); }
-                else if (IS_FLOAT(v)) { vm_push(vm, INT_VAL((int64_t)AS_FLOAT(v))); }
-                else if (IS_BOOL(v)) { vm_push(vm, INT_VAL(AS_BOOL(v) ? 1 : 0)); }
+                if (IS_INT(v)) { result = v; }
+                else if (IS_FLOAT(v)) { result = INT_VAL((int64_t)AS_FLOAT(v)); }
+                else if (IS_BOOL(v)) { result = INT_VAL(AS_BOOL(v) ? 1 : 0); }
                 else if (IS_STRING(v)) {
                     char* end = nullptr;
                     int64_t n = strtoll(AS_CSTRING(v), &end, 10);
-                    vm_push(vm, INT_VAL(n));
+                    result = INT_VAL(n);
                 }
-                else vm_push(vm, INT_VAL(0));
+                else result = INT_VAL(0);
             } break;
             case 1: /* cast to float */ {
-                if (IS_FLOAT(v)) { vm_push(vm, v); }
-                else if (IS_INT(v)) { vm_push(vm, FLOAT_VAL((double)AS_INT(v))); }
+                if (IS_FLOAT(v)) { result = v; }
+                else if (IS_INT(v)) { result = FLOAT_VAL((double)AS_INT(v)); }
                 else if (IS_STRING(v)) {
                     double d = strtod(AS_CSTRING(v), nullptr);
-                    vm_push(vm, FLOAT_VAL(d));
+                    result = FLOAT_VAL(d);
                 }
-                else vm_push(vm, FLOAT_VAL(0.0));
+                else result = FLOAT_VAL(0.0);
             } break;
             case 2: /* cast to string */ {
-                if (IS_STRING(v)) { vm_push(vm, v); }
+                if (IS_STRING(v)) { result = v; }
                 else if (IS_INT(v)) {
                     char buf[64]; snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(v));
-                    vm_push(vm, OBJ_VAL(obj_string_new(buf, (int)strlen(buf))));
+                    result = OBJ_VAL(obj_string_new(buf, (int)strlen(buf)));
                 }
                 else if (IS_FLOAT(v)) {
                     char buf[64]; snprintf(buf, sizeof(buf), "%g", AS_FLOAT(v));
-                    vm_push(vm, OBJ_VAL(obj_string_new(buf, (int)strlen(buf))));
+                    result = OBJ_VAL(obj_string_new(buf, (int)strlen(buf)));
                 }
                 else if (IS_BOOL(v)) {
                     const char* s = AS_BOOL(v) ? "true" : "false";
-                    vm_push(vm, OBJ_VAL(obj_string_new(s, (int)strlen(s))));
+                    result = OBJ_VAL(obj_string_new(s, (int)strlen(s)));
                 }
-                else vm_push(vm, OBJ_VAL(obj_string_new("null", 4)));
+                else result = OBJ_VAL(obj_string_new("null", 4));
             } break;
             case 3: /* cast to bool */ {
-                if (IS_BOOL(v)) { vm_push(vm, v); }
-                else if (IS_NULL(v)) { vm_push(vm, BOOL_VAL(false)); }
-                else if (IS_INT(v)) { vm_push(vm, BOOL_VAL(AS_INT(v) != 0)); }
+                if (IS_BOOL(v)) { result = v; }
+                else if (IS_NULL(v)) { result = BOOL_VAL(false); }
+                else if (IS_INT(v)) { result = BOOL_VAL(AS_INT(v) != 0); }
                 else if (IS_STRING(v)) {
-                    /* "true" -> true, "false" -> false
-                       empty / whitespace only -> false
-                       anything with letters/digits -> true */
                     ObjString* s = AS_STRING(v);
                     if (s->length == 4 && memcmp(s->chars, "true", 4) == 0) {
-                        vm_push(vm, BOOL_VAL(true));
+                        result = BOOL_VAL(true);
                     } else if (s->length == 5 && memcmp(s->chars, "false", 5) == 0) {
-                        vm_push(vm, BOOL_VAL(false));
+                        result = BOOL_VAL(false);
                     } else {
-                        /* Check if all whitespace / empty */
                         bool has_content = false;
                         for (int ci = 0; ci < s->length; ci++) {
                             char ch = s->chars[ci];
@@ -445,13 +470,15 @@ static InterpretResult run(VM* vm) {
                                 has_content = true; break;
                             }
                         }
-                        vm_push(vm, BOOL_VAL(has_content));
+                        result = BOOL_VAL(has_content);
                     }
                 }
-                else vm_push(vm, BOOL_VAL(true));
+                else result = BOOL_VAL(true);
             } break;
-            default: vm_push(vm, v); break;
+            default: result = v; break;
             }
+            vm->stack_top -= 1;
+            vm_push(vm, result);
         } break;
 
         case OP_THROW: {

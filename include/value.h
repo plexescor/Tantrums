@@ -31,7 +31,7 @@ static inline Value NULL_VAL_MAKE()     { Value r; r.type = VAL_NULL;  r.as.inte
 typedef enum { OBJ_STRING, OBJ_LIST, OBJ_MAP, OBJ_FUNCTION, OBJ_NATIVE, OBJ_POINTER } ObjType;
 
 struct Obj        { ObjType type; int refcount; bool is_manual; bool is_marked; Obj* next; };
-struct ObjString  { Obj obj; int length; char* chars; uint32_t hash; };
+struct ObjString  { Obj obj; int length; int capacity; bool is_mutable; char* chars; uint32_t hash; };
 struct ObjList    { Obj obj; Value* items; int count; int capacity; };
 
 typedef struct { ObjString* key; Value value; bool occupied; } MapEntry;
@@ -69,6 +69,8 @@ struct ObjPointer { Obj obj; Value* target; bool is_valid; };
 
 double       value_as_number(Value v);
 ObjString*   obj_string_new(const char* chars, int length);
+ObjString*   obj_string_clone_mutable(ObjString* a);
+void         obj_string_append(ObjString* a, const char* chars, int length);
 ObjString*   obj_string_concat(ObjString* a, ObjString* b);
 ObjList*     obj_list_new(void);
 void         obj_list_append(ObjList* list, Value value);

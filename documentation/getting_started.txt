@@ -1,0 +1,150 @@
+================================================================================
+                    GETTING STARTED WITH TANTRUMS
+================================================================================
+
+Welcome to Tantrums! If you're reading this, you probably successfully downloaded
+the source code and are wondering what exactly you've gotten yourself into.
+
+Let's get your compiler running so you can start throwing `.42AHH` files at the 
+virtual machine.
+
+BASIC INFO: WHAT IS TANTRUMS?
+--------------------------------------------------------------------------------
+Tantrums is a custom, dynamically-typed programming language that also features 
+optional static types. Wait, what? Yes. It's both. You can be as strict as C++ 
+or as loose as JavaScript within the same file just by changing the `#mode`.
+
+The language pipeline compiles `.42AHH` source files into `.42ass` bytecode files 
+(yes, those are the real file extensions, and no, we are not changing them). 
+The `.42ass` bytecode is then executed on a custom stack-based virtual machine 
+that we built from scratch.
+
+It has a C-like syntax, using brace-delimited blocks `{ }` because indentation-
+based syntax is a trap. The overall vibe feels like a fever dream combining 
+Python, C, and absolute chaos. 
+
+HOW TO BUILD THE COMPILER AND VM
+--------------------------------------------------------------------------------
+Because Tantrums is written in pure C and C++, you need to compile the compiler 
+before you can compile your Tantrums code. (Compiler-ception!)
+
+Prerequisites:
+- CMake (version 3.15 or higher)
+- A modern C++23 compatible compiler (MSVC, GCC, or Clang)
+
+Step-by-Step Build Instructions:
+1. Open your terminal of choice.
+2. Navigate to the root folder of the Tantrums project.
+3. Run the CMake configuration command:
+   cmake -B build -S .
+   (This tells CMake to read the CMakeLists.txt and generate build files in the 
+   `build` directory).
+4. Run the build command:
+   cmake --build build --config Release
+   (This compiles the C/C++ source code into an executable binary).
+
+If everything went smoothly, you should now have a `tantrums` executable sitting 
+in your build folder (e.g., `build\Release\tantrums.exe` on Windows or `build/tantrums` 
+on Linux/Mac). Add this directory to your system PATH, or just run it directly.
+
+THE COMMAND LINE INTERFACE (CLI)
+--------------------------------------------------------------------------------
+The `tantrums` executable has three primary modes of operation.
+
+1. Direct Execution:
+   tantrums run your_script.42AHH
+   This command reads your source file, lexes it, parses it, compiles it to 
+   bytecode in memory, and immediately runs it on the VM. It's essentially an 
+   interpreter mode.
+
+2. Compilation:
+   tantrums compile your_script.42AHH
+   This command reads your source file and compiles it into a `.42ass` bytecode 
+   binary file on disk, but does NOT execute it. Useful for distributing your 
+   masterpiece without giving away the source code.
+
+3. Bytecode Execution:
+   tantrums exec your_script.42ass
+   This command loads a pre-compiled `.42ass` file into the VM and runs it. 
+   It skips the lexing and parsing phases entirely, making it super fast to 
+   start up.
+
+YOUR FIRST PROGRAM: HELLO WORLD
+--------------------------------------------------------------------------------
+Every language needs a Hello World. Create a file called `hello.42AHH` and type:
+
+tantrum main() 
+{
+    print("Hello, World!");
+}
+
+Wait, `tantrum main()`? Yes. In this language, functions are declared using the 
+keyword `tantrum`. The `main()` function is the automatic entry point for the VM. 
+When the VM starts executing your code, it immediately looks for a `tantrum` 
+named `main` and calls it. If you don't have a `main()` function, the program 
+will just stare at you blankly and WILL NOT exit.
+
+Run it:
+tantrums run hello.42AHH
+
+ADVANCED INFO: THE COMPILATION PIPELINE
+--------------------------------------------------------------------------------
+If you type `tantrums run hello.42AHH`, what actually happens under the hood?
+
+1. The Lexer scans the string `tantrum main() { print("Hello, World!"); }` 
+   and breaks it into tokens: `TOKEN_TANTRUM`, `TOKEN_IDENTIFIER("main")`, 
+   `TOKEN_LEFT_PAREN`, `TOKEN_RIGHT_PAREN`, `TOKEN_LEFT_BRACE`, etc.
+   
+2. The Parser looks at these tokens and recognizes the grammar of a function 
+   declaration. It builds an Abstract Syntax Tree (AST) node for the function, 
+   containing a block node, which contains a function call node for `print`.
+
+3. The Compiler takes this AST and translates it into virtual machine 
+   instructions. For the `print` statement, it might generate instructions like:
+   `OP_CONSTANT 0` (load the string "Hello, World!" from the constant pool)
+   `OP_GET_GLOBAL "print"` (look up the print function)
+   `OP_CALL 1` (call the function with 1 argument)
+   `OP_RETURN` (exit the function)
+
+4. The Virtual Machine is a massive `switch` statement running in a `while` loop. 
+   It reads the `OP_CONSTANT`, searches the pool, pushes the string to the 
+   operand stack, looks up the print function, pops the string off the stack, 
+   prints it to C++'s `std::cout`, and returns.
+
+The entire process happens in milliseconds. 
+
+LAUGHS & FACTS: THE CHAOS OF TANTRUMS
+--------------------------------------------------------------------------------
+- Did you know that the custom file extension `.42AHH` usually screws up syntax 
+  highlighting in GitHub and editors? To fix this, we literally had to build 
+  our own VS Code extension (`tantrums-vscode/`) complete with custom icons, 
+  snippets, and hover documentation. 
+
+- The VM's bytecode is portable! We serialize the `.42ass` bytecode by writing 
+  raw unsigned 8-bit integers to a binary file. Because the VM is entirely 
+  stack-based and abstract, you can email a `.42ass` file to a friend on a 
+  completely different OS and CPU architecture, and it will execute identically.
+
+- The `main()` function wrapper enforcement was added very late in development. 
+  Originally, you could just write script code floating in the global scope 
+  (like Python). We removed that because managing local variables in the global 
+  scope made the compiler logic excessively convoluted, and we were lazy. So now, 
+  everything must be in a function. Period.
+
+- During the creation of the Lexer, we had a bug where the compiler thought the 
+  EOF (End Of File) token was an actual variable name. The VM tried to allocate 
+  memory for "EOF" and promptly segfaulted. It took 3 hours to figure out why 
+  empty files were destroying the computer.
+
+- The `print()` function is the only built-in function that is practically hard-
+  coded into the core loop of the VM because we got tired of trying to implement 
+  dynamic arguments for native C functions early on. It has VIP access to the 
+  internal stack.
+
+- If you try to run `tantrums compile` without passing a file, the CLI will 
+  insult your intelligence gracefully. Error handling on the user-facing side 
+  was actually a priority so you know exactly why your `.42AHH` code sucks.
+
+================================================================================
+END OF GETTING STARTED. GO WRITE SOME CODE.
+================================================================================

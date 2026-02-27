@@ -1,0 +1,140 @@
+================================================================================
+                         CONTROL FLOW IN TANTRUMS
+================================================================================
+
+BASIC INFO: DIRECTING THE CHAOS
+--------------------------------------------------------------------------------
+You can write linear code all day, but eventually, your program needs to make a 
+decision. That's what control flow is for!
+
+In Tantrums, you have your standard branching statements (`if`, `else if`, and 
+`else`). These conditional checks use curly braces `{ }` because we are civilized 
+programmers who don't rely on arbitrary invisible whitespace characters to 
+structure our logic.
+
+if (x > 10) 
+{
+    print("X is huge.");
+} 
+else if (x == 10) 
+{
+    print("X is exactly ten.");
+} 
+else 
+{
+    print("X is suspiciously small.");
+}
+
+ADVANCED INFO: NO TRUTHY EVALUATIONS
+--------------------------------------------------------------------------------
+In languages like Python or JavaScript, you can write `if (myList)` or 
+`if (myString)`. If the variable has any data, it evaluates as `true`.
+
+Tantrums HATES this. Tantrums refuses to do arbitrary truthy coercion. 
+The expression inside the `if ()` condition MUST evaluate strictly to a `bool` 
+type. If you pass a list, a map, an integer, or a string, the VM will panic and 
+throw a type error during execution because it was expecting a boolean.
+
+Correct way: `if (len(myList) > 0)` or `if (x != null)`
+Incorrect way: `if (myList)`
+
+ADVANCED INFO: FOUR WAYS TO LOOP
+--------------------------------------------------------------------------------
+Tantrums provides an absolute powerhouse of looping constructs. You have standard 
+`while` loops and three different variants of the `for in` loops!
+
+1. Standard While Loops:
+   Simple, efficient, and dangerous if you forget to increment the counter.
+   
+   int count = 5;
+   while (count > 0) 
+   {
+       print(count);
+       count--;
+   }
+
+2. Range-Based For Loops:
+   Python-style range iteration is fully supported by the parser natively. 
+   When you write `for i in range(10)`, the compiler doesn't actually create a 
+   list from 0 to 9 in memory. Instead, it generates heavily optimized bytecode 
+   that initializes `i` to 0, compares it to 10, and executes an `OP_ADD 1` at 
+   the end of the loop block. It's incredibly fast.
+
+3. List Iterators:
+   You can directly iterate over a list. The compiler maintains the internal 
+   index index for you safely so you never hit an out-of-bounds error.
+
+   for item in [1, 2, 3] 
+   {
+       print(item);
+   }
+
+4. String Iterators:
+   Tantrums strings are internally iterable byte sequences. The native `for` loop 
+   pulls each individual character out as a string of length 1.
+
+   for ch in "Hello" 
+   {
+       print(ch); // prints H, e, l, l, o
+   }
+
+ADVANCED INFO: THE GLORIOUS FAT-FINGER OPERATORS
+--------------------------------------------------------------------------------
+Tantrums supports a massive array of standard operators:
+`+`, `-`, `*`, `/`, `%`
+`==`, `!=`, `<`, `>`, `<=`, `>=`
+`&&`, `||`, `!` (or `and`, `or`)
+
+But what if you are typing super fast and accidentally press `=>` instead of `>=`? 
+
+In JavaScript, `=>` initiates a lambda arrow function expression. In C++, the 
+compiler throws thousands of lines of unreadable template instantiation errors 
+because it doesn't know what you are doing.
+
+In Tantrums, we recognized that developers are clumsy. 
+Both `=>` and `=<` are completely valid backwards comparison operators. The 
+lexer intercepts them, smiles at your mistake, and natively translates them to
+ `>=` and `<=` respectively. The exact same behavior applies. 
+It's not a bug. We just optimized the lexer for fat-fingered typists who can't 
+aim properly at the `<` and `>` keys while holding Shift.
+
+LAUGHS & FACTS: THE AST LOOP UNROLLING
+--------------------------------------------------------------------------------
+- Did you know that the compiler implements short-circuit binary evaluation? 
+  If you write `if (false && expensiveFunction())`, the VM evaluates the `false`, 
+  realizes the `AND` condition is already doomed, and literally skips the 
+  `expensiveFunction()` execution entirely by jumping the Instruction Pointer 
+  past the evaluation block. This saves precious CPU cycles so you can use them 
+  for more important things (like creating memory leaks).
+
+- There are no `break` or `continue` keywords yet. Wait, what? Yes. Early in 
+  development, the bytecode compiler had trouble managing scope jump offsets 
+  backward and forward. We eventually got `if` and `while` loop jumps working 
+  perfectly, but adding `break` required calculating the jump offset *before* 
+  the compiler knew where the end of the surrounding block actually was. We gave 
+  up and left it out. If you want to break a loop, use a boolean flag like 
+  `bool running = true; while(running) { running = false; }`. Welcome back to 
+  the 1980s!
+
+- The compiler emits `OP_JUMP_IF_FALSE` and `OP_LOOP` bytecode instructions 
+  to execute conditionals. The operand for these jumps is a signed integer 
+  telling the VM how many bytes forward or backward to move the Instruction 
+  Pointer (IP). If you write an `if` statement block that exceeds the maximum 
+  signed integer offset size (like 65,535 bytes of bytecode inside a single 
+  branch), the compiler will literally shatter and fail to compile. 
+
+- There are currently no `switch` statements. You must write an agonizingly 
+  long chain of `else if` statements. Why? Because compiling `switch` 
+  statements into bytecode requires jump tables, and computing jump tables in 
+  C++ sounded too much like actual work.
+
+- We support compound assignment native operators: `+=`, `-=`, `*=`, `/=`, `%=`. 
+  However, these are purely syntactic sugar implemented in the parser. 
+  `i += 1` just generates the exact same AST tree as `i = i + 1`.
+
+- Increment/Decrement operators (`i++`, `++i`, `i--`, `--i`) are also fully 
+  supported syntax sugar!
+
+================================================================================
+END OF CONTROL FLOW. CHOOSE YOUR PATH CAREFULLY.
+================================================================================

@@ -1,0 +1,124 @@
+================================================================================
+                       VARIABLES AND TYPES IN TANTRUMS
+================================================================================
+
+BASIC INFO: HOW STRICT DO YOU WANT TO BE?
+--------------------------------------------------------------------------------
+In Tantrums, you control exactly how judgmental the compiler is allowed to be. 
+It supports both dynamic and static typing, making it a "gradually typed" 
+language of sorts. You can declare a variable without a type, and it will 
+hold whatever you shove into it:
+
+x = 42;
+name = "Tantrums";
+is_crashing = false;
+
+If you want the compiler to scream at you when you assign strings to integers, 
+you can explicitly define types when you declare them:
+
+int count = 10;
+float pi = 3.14;
+string greeting = "Hello";
+bool alive = true;
+list items = [1, 2, 3];
+map data = {"name": "john", "age": "21"};
+
+Typing a variable means the compiler validates assignments at compile-time. If 
+`hello` is an `int`, and you attempt `hello = "no"`, the compiler denies you.
+
+ADVANCED INFO: MODE DIRECTIVES
+--------------------------------------------------------------------------------
+You manipulate the compiler's strictness using mode directives. These must be 
+the first line(s) in your `.42AHH` file.
+
+1. `#mode static;`
+This puts the compiler into authoritarian mode. ALL variables must have type 
+annotations. If you write `x = 5;` without declaring the type, the compiler 
+will flat-out refuse to compile your code. You must write `int x = 5;`. 
+In this mode, Tantrums acts like C or Java.
+
+2. `#mode dynamic;`
+This tells the compiler to take a nap. In dynamic mode, all type annotations 
+are completely decorative. You can write `int x = "hello";` and the compiler 
+will just nod and smile. Types are ignored during compilation, and everything 
+behaves like Python or JavaScript. Pure chaos.
+
+3. `#mode both;`
+This is the default mode (used if you provide no directive). It's the best of 
+both worlds. If you omit a type (`x = 5;`), the variable is dynamic and can 
+hold anything. If you provide a type (`int x = 5;`), the compiler locks that 
+variable to the integer type and will validate all future assignments to it.
+It's like having a strict parent and a cool uncle living inside the compiler.
+
+You can mix these modes file by file. One module might be strictly typed, while 
+a quick-and-dirty script might be entirely dynamic.
+
+ADVANCED INFO: DEFAULT INITIALIZATIONS
+--------------------------------------------------------------------------------
+What happens if you declare a variable but don't assign anything to it?
+In many languages, this leads to undefined behavior, null pointer crashes, or 
+uninitialized garbage memory.
+
+In Tantrums, variables unassigned safely initialize themselves:
+- `int count;`    -> Defaults to integer containing 0/null representation.
+- `float f;`      -> Defaults to 0.0 value.
+- `list items;`   -> Defaults automatically to an empty list `[]`.
+- `map kv;`       -> Defaults automatically to an empty map `{}`.
+
+You will never get a catastophic segmentation fault just because you forgot to 
+initialize a data structure. The compiler has your back.
+
+ADVANCED INFO: MEMORY REPRESENTATION 
+--------------------------------------------------------------------------------
+Under the hood, every single variable is technically a `Value` struct. We 
+initially tried NaN-boxing (the technique used by LuaJIT and V8) to pack 
+doubles, booleans, and object pointers into a single 64-bit value to save 
+memory overhead. 
+
+We immediately failed because bit-shifting floating points in C++ turned into 
+a nightmare of undefined behavior. So instead, Tantrums uses a bloated, 
+comfortable `enum` + `union` structure. 
+It takes up more memory (around 16 bytes per Value rather than 8 bytes), but 
+it's infinitely easier to read in the C++ source code. We optimized for developer 
+sanity over raw RAM consumption. 
+
+LAUGHS & FACTS: THE STRING DEBACLE
+--------------------------------------------------------------------------------
+- Did you know strings are treated as a literal list of characters under the hood? 
+  Well, they were. We originally implemented strings as `list` objects where 
+  each element was a one-character string. The performance was catastrophic. 
+  Constructing "hello" required five separate memory allocations for each letter, 
+  plus one for the list itself.
+
+- Recently, we realized that was an absurd way to build a language, so we tore 
+  out the list-of-characters implementation and created a dedicated dynamic 
+  buffer type with `char* data`, `length`, and `capacity`. Now, appending a 
+  character (`s += "a"`) has an amortized O(1) complexity because we double 
+  the capacity recursively. We reduced the execution time of a 200,000 append 
+  operation from over 100 seconds to under 500 milliseconds.
+
+- If you try to add a number to a string, like `"Score: " + 42`, Tantrums 
+  doesn't crash or throw a type error. It just auto-converts the integer into 
+  a string and gives you `"Score: 42"`. The VM literally intercepts the binary `+` 
+  operator, checks if one side is a string and the other is a number, and calls 
+  `sprintf()` on the number before concatenating. It's aggressively helpful.
+
+- There is no truthy or falsy nonsense. In JavaScript, `0`, empty strings `""`, 
+  and `null` evaluate to `false` in `if` statements. In Python, empty lists evaluate 
+  to `false`. In Tantrums? No. A boolean is explicitly `true` or `false`. Only 
+  booleans can be evaluated in conditional checks. We refuse to compromise our 
+  principles for developer convenience. You must write `if (len(items) > 0)`, 
+  not `if (items)`.
+
+- The `type(x)` built-in function returns the type name of a variable as a string. 
+  It literally just runs a C++ `switch(value.type)` and returns a static string 
+  literal. It's incredibly fast because there's absolutely no introspection or 
+  reflection happening. 
+
+- You can create nested lists and maps forever. `[[1, 2], {"nested": [4, 5]}]` 
+  is totally valid. The compiler doesn't care until you blow the stack or run 
+  out of RAM. Recursion is fun!
+
+================================================================================
+END OF VARIABLES AND TYPES. CHOOSE YOUR MODE CAREFULLY.
+================================================================================

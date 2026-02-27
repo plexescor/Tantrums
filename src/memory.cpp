@@ -10,16 +10,9 @@ size_t tantrums_bytes_allocated = 0;
 size_t tantrums_next_gc = 1024 * 1024;
 
 extern Obj* all_objects;
-extern ObjString** intern_table;
-extern int intern_count;
-extern int intern_cap;
 extern VM* current_vm_for_gc;
 
 void* tantrums_realloc(void* ptr, size_t old_size, size_t new_size) {
-    tantrums_bytes_allocated += new_size - old_size;
-    if (tantrums_bytes_allocated > tantrums_next_gc) {
-        tantrums_gc_collect();
-    }
     if (new_size == 0) { free(ptr); return nullptr; }
     return realloc(ptr, new_size);
 }
@@ -124,7 +117,7 @@ static void sweep() {
             
             size_t size = 0;
             switch(unreached->type) {
-                case OBJ_STRING: size = sizeof(ObjString) + ((ObjString*)unreached)->length + 1; break;
+                case OBJ_STRING: size = sizeof(ObjString) + ((ObjString*)unreached)->capacity + 1; break;
                 case OBJ_LIST: size = sizeof(ObjList) + sizeof(Value) * ((ObjList*)unreached)->capacity; break;
                 case OBJ_MAP: size = sizeof(ObjMap) + sizeof(MapEntry) * ((ObjMap*)unreached)->capacity; break;
                 case OBJ_FUNCTION: size = sizeof(ObjFunction); break;
@@ -142,16 +135,7 @@ static void sweep() {
     }
 }
 
-static void table_remove_white(ObjString** table, int capacity) {
-    if (!table) return;
-    for (int i = 0; i < capacity; i++) {
-        ObjString* string = table[i];
-        if (string != nullptr && !string->obj.is_marked && !string->obj.is_manual) {
-            table[i] = nullptr;
-            intern_count--;
-        }
-    }
-}
+
 
 static void mark_roots() {
     if (!current_vm_for_gc) return;
@@ -178,21 +162,7 @@ static void mark_roots() {
 }
 
 void tantrums_gc_collect(void) {
-#if DEBUG_LOG_GC
-    size_t before = tantrums_bytes_allocated;
-#endif
-
-    mark_roots();
-    trace_references();
-    table_remove_white(intern_table, intern_cap);
-    sweep();
-
-    tantrums_next_gc = tantrums_bytes_allocated * 2;
-    if (tantrums_next_gc < 1024 * 1024) tantrums_next_gc = 1024 * 1024;
-
-#if DEBUG_LOG_GC
-    printf("\n-- GC: Collected %zu bytes (from %zu to %zu)\n", before - tantrums_bytes_allocated, before, tantrums_bytes_allocated);
-#endif
+    // GC Disabled. We only clean up at program exit.
 }
 
 void tantrums_free_all_objects(void) {
@@ -203,10 +173,6 @@ void tantrums_free_all_objects(void) {
         obj = next;
     }
     all_objects = nullptr;
-    if (intern_table) free(intern_table);
-    intern_table = nullptr;
-    intern_count = 0;
-    intern_cap = 0;
     
     if (gray_stack) {
         free(gray_stack);

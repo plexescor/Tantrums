@@ -16,7 +16,7 @@ static TableEntry* find_entry(TableEntry* entries, int cap, ObjString* key) {
         if (e->key == nullptr) {
             if (IS_NULL(e->value)) return tombstone ? tombstone : e;
             if (!tombstone) tombstone = e;
-        } else if (e->key == key) {
+        } else if (e->key == key || (e->key->length == key->length && e->key->hash == key->hash && memcmp(e->key->chars, key->chars, key->length) == 0)) {
             return e;
         }
         idx = (idx + 1) & (cap - 1);
