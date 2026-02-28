@@ -11,23 +11,88 @@
 
 VM* current_vm_for_gc = nullptr;
 bool global_allow_leaks = false;
+bool global_autofree = true;
 
 void vm_init(VM* vm) {
+    memset(vm, 0, sizeof(VM));
     vm->stack_top = vm->stack;
-    vm->frame_count = 0;
-    vm->handler_count = 0;
-    vm->objects = nullptr;
-    vm->scope_depth = 0;
-    vm->auto_free_records = nullptr;
-    vm->auto_free_capacity = 0;
-    vm->auto_free_count = 0;
-    vm->total_auto_frees = 0;
     table_init(&vm->globals);
     builtins_register(vm);
 }
 
+static void vm_exit_scope(VM* vm) {
+    if (vm->scope_depth > 0) {
+        vm->scope_depth--;
+        /* Scan all live pointers: if allocated in this scope and not escaped, free it */
+        extern Obj* all_objects;
+        Obj* o = all_objects;
+        
+        Obj* marker = nullptr;
+        if (vm->scope_depth < MAX_LOCAL_SCOPES) {
+            marker = vm->scope_alloc_markers[vm->scope_depth];
+        }
+
+        Obj* prev = nullptr;
+        while (o && o != marker) {
+            Obj* next_node = o->next;
+            if (o->type == OBJ_POINTER) {
+                ObjPointer* p = (ObjPointer*)o;
+                if (p->auto_manage && p->is_valid && p->target && !p->escaped && p->scope_depth > vm->scope_depth) {
+                    extern bool suppress_autofree_notes;
+                    if (!suppress_autofree_notes) {
+
+                        const char* func_name = p->alloc_func ? p->alloc_func->chars : "main";
+                        const char* type_name = p->alloc_type ? p->alloc_type->chars : "dynamic";
+                        int line = p->alloc_line;
+                        size_t size = p->alloc_size;
+                        
+                        bool found = false;
+                        for (int i = 0; i < vm->auto_free_count; i++) {
+                            AutoFreeRecord* rec = &vm->auto_free_records[i];
+                            if (rec->line == line && rec->size == size && strcmp(rec->func_name, func_name) == 0 && strcmp(rec->type_name, type_name) == 0) {
+                                rec->count++;
+                                found = true;
+                                break;
+                            }
+                        }
+                        if (!found) {
+                            if (vm->auto_free_count >= vm->auto_free_capacity) {
+                                vm->auto_free_capacity = vm->auto_free_capacity < 8 ? 8 : vm->auto_free_capacity * 2;
+                                vm->auto_free_records = (AutoFreeRecord*)realloc(vm->auto_free_records, sizeof(AutoFreeRecord) * vm->auto_free_capacity);
+                            }
+                            AutoFreeRecord* new_rec = &vm->auto_free_records[vm->auto_free_count++];
+                            new_rec->func_name = func_name;
+                            new_rec->type_name = type_name;
+                            new_rec->line = line;
+                            new_rec->size = size;
+                            new_rec->count = 1;
+                        }
+                        vm->total_auto_frees++;
+                    }
+                    free(p->target);
+                    p->target = nullptr;
+                    p->is_valid = false;
+                    
+                    /* Physically Unlink ObjPointer Structure from Linked List */
+                    if (prev == nullptr) all_objects = next_node;
+                    else prev->next = next_node;
+                    
+                    extern void* tantrums_realloc(void* pointer, size_t oldSize, size_t newSize);
+                    tantrums_realloc(o, sizeof(ObjPointer), 0);
+                    
+                    o = next_node;
+                    continue; /* Do not advance prev since current was removed */
+                }
+            }
+            prev = o;
+            o = next_node;
+        }
+    }
+}
+
 void vm_free(VM* vm) {
-    if (vm->total_auto_frees > 0) {
+    extern bool global_autofree;
+    if (global_autofree && vm->total_auto_frees > 0) {
         FILE* out_file = stdout;
         bool write_to_file = vm->total_auto_frees > 20;
 
@@ -234,6 +299,7 @@ static bool call_value(VM* vm, Value callee, int argc) {
         frame->function = fn;
         frame->ip = fn->chunk->code;
         frame->slots = vm->stack_top - argc - 1;
+        frame->saved_scope_depth = vm->scope_depth;
         return true;
     }
     if (IS_NATIVE(callee)) {
@@ -384,11 +450,15 @@ static InterpretResult run(VM* vm) {
         } break;
         case OP_SET_GLOBAL: {
             ObjString* name = AS_STRING(READ_CONSTANT());
-            table_set(&vm->globals, name, vm_peek(vm, 0));
+            Value val = vm_peek(vm, 0);
+            if (IS_POINTER(val)) AS_POINTER(val)->escaped = true;
+            table_set(&vm->globals, name, val);
         } break;
         case OP_DEFINE_GLOBAL: {
             ObjString* name = AS_STRING(READ_CONSTANT());
-            table_set(&vm->globals, name, vm_peek(vm, 0));
+            Value val = vm_peek(vm, 0);
+            if (IS_POINTER(val)) AS_POINTER(val)->escaped = true;
+            table_set(&vm->globals, name, val);
             vm_pop(vm);
         } break;
 
@@ -413,8 +483,6 @@ static InterpretResult run(VM* vm) {
                 if (IS_POINTER(arg)) AS_POINTER(arg)->escaped = true;
             }
             if (!call_value(vm, vm_peek(vm, argc), argc)) return INTERPRET_RUNTIME_ERROR;
-            /* Save caller's scope_depth in the new frame so we can restore on return */
-            vm->frames[vm->frame_count - 1].saved_scope_depth = vm->scope_depth;
             frame = &vm->frames[vm->frame_count - 1];
         } break;
 
@@ -422,10 +490,16 @@ static InterpretResult run(VM* vm) {
             Value result = vm_pop(vm);
             if (IS_POINTER(result)) AS_POINTER(result)->escaped = true;
             int restore_depth = frame->saved_scope_depth;
+            
+            /* Unwind all scopes created within this function */
+            while (vm->scope_depth > restore_depth) {
+                vm_exit_scope(vm);
+            }
+
             vm->frame_count--;
             if (vm->frame_count == 0) { vm_pop(vm); return INTERPRET_OK; }
             vm->stack_top = frame->slots;
-            vm->scope_depth = restore_depth; /* restore caller's scope depth */
+            vm->scope_depth = restore_depth; /* restore caller's scope depth (should already be reached) */
             vm_push(vm, result);
             frame = &vm->frames[vm->frame_count - 1];
         } break;
@@ -526,59 +600,24 @@ static InterpretResult run(VM* vm) {
 
         case OP_ENTER_SCOPE: {
             if (vm->scope_depth < MAX_LOCAL_SCOPES) {
+                /* We record the marker at scope_depth BEFORE incrementing.
+                 * vm_exit_scope() decrements scope_depth first, then reads
+                 * scope_alloc_markers[vm->scope_depth].  So the index used
+                 * on exit equals the index we store here. */
                 vm->scope_base_slots[vm->scope_depth] = vm->stack_top;
+                extern Obj* all_objects;
+                vm->scope_alloc_markers[vm->scope_depth] = all_objects;
             }
             vm->scope_depth++;
         } break;
-
+        
         case OP_EXIT_SCOPE: {
-            if (vm->scope_depth > 0) {
-                vm->scope_depth--;
-                /* Scan all live pointers: if allocated in this scope and not escaped, free it */
-                extern Obj* all_objects;
-                Obj* o = all_objects;
-                while (o) {
-                    if (o->type == OBJ_POINTER) {
-                        ObjPointer* p = (ObjPointer*)o;
-                        if (p->auto_manage && p->is_valid && p->target && !p->escaped && p->scope_depth > vm->scope_depth) {
-                            extern bool suppress_autofree_notes;
-                            if (!suppress_autofree_notes) {
-                                const char* func_name = p->alloc_func ? p->alloc_func->chars : "main";
-                                const char* type_name = p->alloc_type ? p->alloc_type->chars : "dynamic";
-                                int line = p->alloc_line;
-                                size_t size = p->alloc_size;
-                                
-                                bool found = false;
-                                for (int i = 0; i < vm->auto_free_count; i++) {
-                                    AutoFreeRecord* rec = &vm->auto_free_records[i];
-                                    if (rec->line == line && rec->size == size && strcmp(rec->func_name, func_name) == 0 && strcmp(rec->type_name, type_name) == 0) {
-                                        rec->count++;
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                                if (!found) {
-                                    if (vm->auto_free_count >= vm->auto_free_capacity) {
-                                        vm->auto_free_capacity = vm->auto_free_capacity < 8 ? 8 : vm->auto_free_capacity * 2;
-                                        vm->auto_free_records = (AutoFreeRecord*)realloc(vm->auto_free_records, sizeof(AutoFreeRecord) * vm->auto_free_capacity);
-                                    }
-                                    AutoFreeRecord* new_rec = &vm->auto_free_records[vm->auto_free_count++];
-                                    new_rec->func_name = func_name;
-                                    new_rec->type_name = type_name;
-                                    new_rec->line = line;
-                                    new_rec->size = size;
-                                    new_rec->count = 1;
-                                }
-                                vm->total_auto_frees++;
-                            }
-                            free(p->target);
-                            p->target = nullptr;
-                            p->is_valid = false;
-                        }
-                    }
-                    o = o->next;
-                }
-            }
+            vm_exit_scope(vm);
+        } break;
+        
+        case OP_MARK_ESCAPED: {
+            Value v = vm_peek(vm, 0);
+            if (IS_POINTER(v)) AS_POINTER(v)->escaped = true;
         } break;
 
         case OP_ALLOC: {
@@ -607,7 +646,31 @@ static InterpretResult run(VM* vm) {
             Value v = vm_pop(vm);
             if (IS_POINTER(v)) {
                 ObjPointer* p = AS_POINTER(v);
-                if (p->is_valid && p->target) { free(p->target); p->target = nullptr; p->is_valid = false; }
+                if (p->is_valid && p->target) { 
+                    free(p->target); 
+                    p->target = nullptr; 
+                    p->is_valid = false; 
+                    
+                    /* Physically Unlink ObjPointer Structure from Linked List */
+                    extern Obj* all_objects;
+                    Obj* o = all_objects;
+                    Obj* prev = nullptr;
+                    while (o) {
+                        if (o == (Obj*)p) {
+                            if (prev == nullptr) all_objects = o->next;
+                            else prev->next = o->next;
+                            
+                            extern void* tantrums_realloc(void* pointer, size_t oldSize, size_t newSize);
+                            tantrums_realloc(o, sizeof(ObjPointer), 0);
+                            break;
+                        }
+                        prev = o;
+                        o = o->next;
+                    }
+                } else {
+                    vm_runtime_error(vm, "Double-free detected: pointer has already been freed.");
+                    return INTERPRET_RUNTIME_ERROR;
+                }
             }
         } break;
 
@@ -782,7 +845,10 @@ static InterpretResult run(VM* vm) {
             if (vm->handler_count > 0) vm->handler_count--;
         } break;
 
-        case OP_HALT: return INTERPRET_OK;
+        case OP_HALT: {
+            while (vm->scope_depth > 0) vm_exit_scope(vm);
+            return INTERPRET_OK;
+        }
 
         default:
             vm_runtime_error(vm, "Unknown opcode %d.", instruction);
@@ -947,6 +1013,7 @@ InterpretResult vm_interpret(VM* vm, const char* source) {
     frame->function = script;
     frame->ip = script->chunk->code;
     frame->slots = vm->stack;
+    frame->saved_scope_depth = 0;
 
     /* Run the top-level code (defines functions/globals) */
     InterpretResult result = run(vm);

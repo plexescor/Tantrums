@@ -31,7 +31,7 @@
  */
 
 #define BYTECODE_MAGIC "42AS"
-#define BYTECODE_VERSION 1
+#define BYTECODE_VERSION 2
 
 /* Write compiled function to .42ass file. Returns true on success. */
 bool bytecode_write(const char* path, ObjFunction* script);

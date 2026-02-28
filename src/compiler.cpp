@@ -297,7 +297,9 @@ static void end_scope(int line) {
         bool is_hidden = (local->name[0] == '\0' || memcmp(local->name, "$", 1) == 0);
 
         if (local->holds_alloc && !is_hidden) {
-            if (compile_allow_leaks_enabled) {
+            if (compile_autofree_enabled) {
+                /* Suppression: Layer 2 Runtime will handle this during OP_EXIT_SCOPE */
+            } else if (compile_allow_leaks_enabled) {
                 printf("[Line %d] Warning: Potential memory leak. Pointer '%s' goes out of scope without being freed. (#allowMemoryLeaks true)\n", line, local->name);
             } else {
                 char buf[512];
@@ -596,12 +598,17 @@ static void compile_expr(ASTNode* node) {
         if (slot != -1) {
             /* Reassign existing local — set, leaves copy on stack */
             emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
+        } else if (is_global_tracked(node->as.assign.name)) {
+            /* Reassign existing global */
+            ObjString* name = obj_string_new(node->as.assign.name, (int)strlen(node->as.assign.name));
+            emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
         } else if (current->scope_depth > 0) {
             /* Inside a function: create a new local variable. */
             int new_slot = add_local(node->as.assign.name, (int)strlen(node->as.assign.name));
-            emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)new_slot);
+            emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)new_slot);
         } else {
             /* Top-level: create/update a global */
+            track_global(node->as.assign.name);
             ObjString* name = obj_string_new(node->as.assign.name, (int)strlen(node->as.assign.name));
             emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
         }
@@ -683,7 +690,8 @@ typedef struct {
     bool only_simple_assign;
 } EscapeResult;
 
-static void analyze_escape(ASTNode* node, const char* target_name, int loop_depth, EscapeResult* result) {
+/* Walk the AST to see if 'target_name' escapes its current scope */
+static void analyze_escape(CompilerState* current, ASTNode* node, const char* target_name, int loop_depth, EscapeResult* result) {
     if (!node || result->escaped) return;
 
     switch (node->type) {
@@ -700,7 +708,7 @@ static void analyze_escape(ASTNode* node, const char* target_name, int loop_dept
     case NODE_RETURN: {
         /* Condition 1: Return escape */
         EscapeResult ret_check = {false, false, 0, true};
-        analyze_escape(node->as.child, target_name, loop_depth, &ret_check);
+        analyze_escape(current, node->as.child, target_name, loop_depth, &ret_check);
         if (ret_check.use_count > 0) result->escaped = true;
         break;
     }
@@ -716,40 +724,49 @@ static void analyze_escape(ASTNode* node, const char* target_name, int loop_dept
                 if (loop_depth > 0) result->escaped = true;
                 
                 /* Analyze the RHS value normally */
-                analyze_escape(assign->as.index_assign.value, target_name, loop_depth, result);
+                analyze_escape(current, assign->as.index_assign.value, target_name, loop_depth, result);
                 return; /* Don't traverse object (would trigger condition 7) */
             }
         }
-        analyze_escape(node->as.child, target_name, loop_depth, result);
+        analyze_escape(current, node->as.child, target_name, loop_depth, result);
         break;
     }
     case NODE_CALL: {
         /* Condition 2: Function call escape */
         for (int i = 0; i < node->as.call.arg_count; i++) {
             EscapeResult arg_check = {false, false, 0, true};
-            analyze_escape(node->as.call.args[i], target_name, loop_depth, &arg_check);
+            analyze_escape(current, node->as.call.args[i], target_name, loop_depth, &arg_check);
             if (arg_check.use_count > 0) result->escaped = true;
         }
-        analyze_escape(node->as.call.callee, target_name, loop_depth, result);
+        analyze_escape(current, node->as.call.callee, target_name, loop_depth, result);
         break;
     }
     case NODE_ASSIGN:
     case NODE_VAR_DECL: {
         /* Condition 3/5: Alias / Global escape */
+        if (node->type == NODE_ASSIGN) {
+            if (current != nullptr && resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name)) == -1) {
+                /* Target is a global variable */
+                EscapeResult rhs_check = {false, false, 0, true};
+                analyze_escape(current, node->as.assign.value, target_name, loop_depth, &rhs_check);
+                if (rhs_check.use_count > 0) result->escaped = true;
+                break;
+            }
+        }
         ASTNode* rhs = (node->type == NODE_ASSIGN) ? node->as.assign.value : node->as.var_decl.init;
         EscapeResult rhs_check = {false, false, 0, true};
-        analyze_escape(rhs, target_name, loop_depth, &rhs_check);
+        analyze_escape(current, rhs, target_name, loop_depth, &rhs_check);
         if (rhs_check.use_count > 0) result->escaped = true;
         break;
     }
     case NODE_INDEX_ASSIGN: {
         /* Condition 4: Map/List escape */
         EscapeResult val_check = {false, false, 0, true};
-        analyze_escape(node->as.index_assign.value, target_name, loop_depth, &val_check);
+        analyze_escape(current, node->as.index_assign.value, target_name, loop_depth, &val_check);
         if (val_check.use_count > 0) result->escaped = true;
         
-        analyze_escape(node->as.index_assign.object, target_name, loop_depth, result);
-        if (node->as.index_assign.index) analyze_escape(node->as.index_assign.index, target_name, loop_depth, result);
+        analyze_escape(current, node->as.index_assign.object, target_name, loop_depth, result);
+        if (node->as.index_assign.index) analyze_escape(current, node->as.index_assign.index, target_name, loop_depth, result);
         break;
     }
     case NODE_FREE: {
@@ -763,64 +780,64 @@ static void analyze_escape(ASTNode* node, const char* target_name, int loop_dept
                 return;
             }
         }
-        analyze_escape(node->as.child, target_name, loop_depth, result);
+        analyze_escape(current, node->as.child, target_name, loop_depth, result);
         break;
     }
     case NODE_BLOCK: {
         for (int i = 0; i < node->as.block.count; i++) {
-            analyze_escape(node->as.block.nodes[i], target_name, loop_depth, result);
+            analyze_escape(current, node->as.block.nodes[i], target_name, loop_depth, result);
         }
         break;
     }
     case NODE_IF: {
-        analyze_escape(node->as.if_stmt.cond, target_name, loop_depth, result);
-        analyze_escape(node->as.if_stmt.then_b, target_name, loop_depth + 1, result);
-        if (node->as.if_stmt.else_b) analyze_escape(node->as.if_stmt.else_b, target_name, loop_depth + 1, result);
+        analyze_escape(current, node->as.if_stmt.cond, target_name, loop_depth, result);
+        analyze_escape(current, node->as.if_stmt.then_b, target_name, loop_depth + 1, result);
+        if (node->as.if_stmt.else_b) analyze_escape(current, node->as.if_stmt.else_b, target_name, loop_depth + 1, result);
         break;
     }
     case NODE_WHILE: {
-        analyze_escape(node->as.while_stmt.cond, target_name, loop_depth, result);
-        analyze_escape(node->as.while_stmt.body, target_name, loop_depth + 1, result);
+        analyze_escape(current, node->as.while_stmt.cond, target_name, loop_depth, result);
+        analyze_escape(current, node->as.while_stmt.body, target_name, loop_depth + 1, result);
         break;
     }
     case NODE_FOR_IN: {
-        analyze_escape(node->as.for_in.iterable, target_name, loop_depth, result);
-        analyze_escape(node->as.for_in.body, target_name, loop_depth + 1, result);
+        analyze_escape(current, node->as.for_in.iterable, target_name, loop_depth, result);
+        analyze_escape(current, node->as.for_in.body, target_name, loop_depth + 1, result);
         break;
     }
     case NODE_BINARY:
-        analyze_escape(node->as.binary.left, target_name, loop_depth, result);
-        analyze_escape(node->as.binary.right, target_name, loop_depth, result);
+        analyze_escape(current, node->as.binary.left, target_name, loop_depth, result);
+        analyze_escape(current, node->as.binary.right, target_name, loop_depth, result);
         break;
     case NODE_UNARY:
         /* TOKEN_STAR is a pointer dereference (*p) — reading through p, not escaping it.
            Do NOT recurse into the operand in this case; p stays local. */
         if (node->as.unary.op != TOKEN_STAR) {
-            analyze_escape(node->as.unary.operand, target_name, loop_depth, result);
+            analyze_escape(current, node->as.unary.operand, target_name, loop_depth, result);
         }
         break;
     case NODE_INDEX:
-        analyze_escape(node->as.index_access.object, target_name, loop_depth, result);
-        analyze_escape(node->as.index_access.index, target_name, loop_depth, result);
+        analyze_escape(current, node->as.index_access.object, target_name, loop_depth, result);
+        analyze_escape(current, node->as.index_access.index, target_name, loop_depth, result);
         break;
     case NODE_POSTFIX:
-        analyze_escape(node->as.postfix.operand, target_name, loop_depth, result);
+        analyze_escape(current, node->as.postfix.operand, target_name, loop_depth, result);
         break;
     case NODE_ALLOC:
-        analyze_escape(node->as.alloc_expr.init, target_name, loop_depth, result);
+        analyze_escape(current, node->as.alloc_expr.init, target_name, loop_depth, result);
         break;
     case NODE_LIST_LIT:
-        for (int i = 0; i < node->as.list_literal.count; i++) analyze_escape(node->as.list_literal.nodes[i], target_name, loop_depth, result);
+        for (int i = 0; i < node->as.list_literal.count; i++) analyze_escape(current, node->as.list_literal.nodes[i], target_name, loop_depth, result);
         break;
     case NODE_MAP_LIT:
         for (int i = 0; i < node->as.map_literal.count; i++) {
-            analyze_escape(node->as.map_literal.keys[i], target_name, loop_depth, result);
-            analyze_escape(node->as.map_literal.values[i], target_name, loop_depth, result);
+            analyze_escape(current, node->as.map_literal.keys[i], target_name, loop_depth, result);
+            analyze_escape(current, node->as.map_literal.values[i], target_name, loop_depth, result);
         }
         break;
     case NODE_TRY_CATCH:
-        analyze_escape(node->as.try_catch.try_body, target_name, loop_depth + 1, result);
-        analyze_escape(node->as.try_catch.catch_body, target_name, loop_depth + 1, result);
+        analyze_escape(current, node->as.try_catch.try_body, target_name, loop_depth + 1, result);
+        analyze_escape(current, node->as.try_catch.catch_body, target_name, loop_depth + 1, result);
         break;
     default:
         break;
@@ -976,7 +993,7 @@ static void compile_node(ASTNode* node) {
                 if (slot != -1) {
                     EscapeResult er = {false, false, 0, true};
                     for (int j = i + 1; j < node->as.block.count; j++) {
-                        analyze_escape(node->as.block.nodes[j], target_name, 0, &er);
+                        analyze_escape(current, node->as.block.nodes[j], target_name, 0, &er);
                         if (er.escaped) break;
                     }
 
@@ -1007,18 +1024,33 @@ static void compile_node(ASTNode* node) {
         compile_expr(node->as.if_stmt.cond);
         int then_jump = emit_jump(node->line, OP_JUMP_IF_FALSE);
         emit_byte(node->line, OP_POP); /* pop condition */
-        /* Compile then-body statements directly — do NOT emit OP_ENTER_SCOPE/OP_EXIT_SCOPE
-           for if/else bodies. Jumps can skip OP_ENTER_SCOPE but not its matching
-           OP_EXIT_SCOPE (or vice versa), which corrupts vm->scope_depth permanently. */
+
+        /* Compile then-body with its own scope tracking.
+         * We do NOT emit OP_ENTER_SCOPE/OP_EXIT_SCOPE (which would corrupt vm->scope_depth
+         * if the jump skips the ENTER but still hits the EXIT).
+         * Instead, we save local_count before each branch, compile the branch statements
+         * inline at the SAME scope_depth, then manually emit OP_POPs for any new locals
+         * created inside that branch — BEFORE the jump that exits the branch.
+         * This keeps the stack balanced regardless of which branch actually runs. */
+        int locals_before_then = current->local_count;
         if (node->as.if_stmt.then_b && node->as.if_stmt.then_b->type == NODE_BLOCK) {
             for (int i = 0; i < node->as.if_stmt.then_b->as.block.count; i++)
                 compile_node(node->as.if_stmt.then_b->as.block.nodes[i]);
         } else {
             compile_node(node->as.if_stmt.then_b);
         }
+        /* Pop any locals the then-branch created, before we jump past the else. */
+        int then_locals_added = current->local_count - locals_before_then;
+        for (int k = 0; k < then_locals_added; k++) {
+            emit_byte(node->line, OP_POP);
+        }
+        current->local_count = locals_before_then;
+
         int else_jump = emit_jump(node->line, OP_JUMP);
         patch_jump(then_jump);
         emit_byte(node->line, OP_POP);
+
+        int locals_before_else = current->local_count;
         if (node->as.if_stmt.else_b) {
             if (node->as.if_stmt.else_b->type == NODE_BLOCK) {
                 for (int i = 0; i < node->as.if_stmt.else_b->as.block.count; i++)
@@ -1027,6 +1059,13 @@ static void compile_node(ASTNode* node) {
                 compile_node(node->as.if_stmt.else_b);
             }
         }
+        /* Pop any locals the else-branch created, before we fall through. */
+        int else_locals_added = current->local_count - locals_before_else;
+        for (int k = 0; k < else_locals_added; k++) {
+            emit_byte(node->line, OP_POP);
+        }
+        current->local_count = locals_before_else;
+
         patch_jump(else_jump);
     } break;
 
@@ -1055,10 +1094,9 @@ static void compile_node(ASTNode* node) {
     } break;
 
     case NODE_FOR_IN: {
-        /* Compile iterable onto stack, clone it, then hidden counter */
+        /* Compile iterable onto stack, then hidden counter */
         begin_scope();
         compile_expr(node->as.for_in.iterable);
-        emit_byte(node->line, OP_CLONE);
         int iterable_slot = add_local("$iter", 5);
         emit_constant(node->line, INT_VAL(0));
         int counter_slot = add_local("$idx", 4);
@@ -1245,11 +1283,16 @@ static void compile_node(ASTNode* node) {
                 /* Check if this pointer escapes via the return expression before erroring */
                 if (node->as.child) {
                     EscapeResult er = {false, false, 0, true};
-                    analyze_escape(node->as.child, current->locals[i].name, 0, &er);
+                    analyze_escape(current, node->as.child, current->locals[i].name, 0, &er);
                     if (er.use_count > 0) {
                         current->locals[i].holds_alloc = false;
                         continue;
                     }
+                }
+                if (compile_autofree_enabled) {
+                    /* Layer 2 will handle local pointers on return */
+                    current->locals[i].holds_alloc = false;
+                    continue;
                 }
                 if (compile_allow_leaks_enabled) {
                     printf("[Line %d] Warning: Potential memory leak. Pointer '%s' goes out of scope without being freed. (#allowMemoryLeaks true)\n", node->line, current->locals[i].name);
@@ -1284,29 +1327,53 @@ static void compile_node(ASTNode* node) {
         emit_byte(node->line, OP_FREE);
         break;
 
-    case NODE_BREAK:
+    case NODE_BREAK: {
         if (current_loop == nullptr) {
             type_error(node->line, "'break' used outside of loop.");
             break;
         }
-        for (int i = current->local_count - 1; i >= 0 && current->locals[i].depth > current_loop->scope_depth; i--) {
-            emit_byte(node->line, OP_POP);
+        
+        /* Unwind scopes back to the loop's base scope.
+           Landing code will handle loop's own scope exit for break. */
+        int target_depth = current_loop->scope_depth;
+        int temp_depth = current->scope_depth;
+        while (temp_depth > target_depth) {
+            for (int i = current->local_count - 1; i >= 0; i--) {
+                if (current->locals[i].depth == temp_depth) {
+                    emit_byte(node->line, OP_POP);
+                }
+            }
+            emit_byte(node->line, OP_EXIT_SCOPE);
+            temp_depth--;
         }
+
         if (current_loop->break_count < 64) {
             current_loop->breaks[current_loop->break_count++] = emit_jump(node->line, OP_JUMP);
         } else {
             type_error(node->line, "Too many breaks in loop.");
         }
         break;
+    }
 
-    case NODE_CONTINUE:
+    case NODE_CONTINUE: {
         if (current_loop == nullptr) {
             type_error(node->line, "'continue' used outside of loop.");
             break;
         }
-        for (int i = current->local_count - 1; i >= 0 && current->locals[i].depth > current_loop->scope_depth; i--) {
-            emit_byte(node->line, OP_POP);
+        
+        /* Unwind scopes back to loop body base */
+        int target_depth = current_loop->scope_depth;
+        int temp_depth = current->scope_depth;
+        while (temp_depth > target_depth) {
+            for (int i = current->local_count - 1; i >= 0; i--) {
+                if (current->locals[i].depth == temp_depth) {
+                    emit_byte(node->line, OP_POP);
+                }
+            }
+            emit_byte(node->line, OP_EXIT_SCOPE);
+            temp_depth--;
         }
+
         if (current_loop->type == 0) { /* while loop */
             emit_loop(node->line, current_loop->start);
         } else { /* for_in loop, forward jump to continue target */
@@ -1317,6 +1384,7 @@ static void compile_node(ASTNode* node) {
             }
         }
         break;
+    }
 
 
     case NODE_PROGRAM:
@@ -1383,6 +1451,8 @@ static void compile_node(ASTNode* node) {
 
     case NODE_AUTOFREE:
         compile_autofree_enabled = node->as.autofree.enabled;
+        extern bool global_autofree;
+        global_autofree = compile_autofree_enabled;
         break;
 
     case NODE_ALLOW_LEAKS:
@@ -1404,6 +1474,9 @@ ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
     compile_autofree_enabled = true;
     compile_allow_leaks_enabled = false;
     global_allow_leaks = false;
+    
+    extern bool global_autofree;
+    global_autofree = true;
 
     /* Pre-scan to collect function signatures for type checking */
     prescan_signatures(program);

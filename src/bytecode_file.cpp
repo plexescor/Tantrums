@@ -163,6 +163,12 @@ bool bytecode_write(const char* path, ObjFunction* script) {
     fwrite(BYTECODE_MAGIC, 1, 4, f);
     write_u8(f, BYTECODE_VERSION);
 
+    /* Configs */
+    extern bool global_allow_leaks;
+    write_u8(f, global_allow_leaks ? 1 : 0);
+    extern bool global_autofree;
+    write_u8(f, global_autofree ? 1 : 0);
+
     /* Script function (contains all others as constants) */
     write_function(f, script);
 
@@ -191,6 +197,12 @@ ObjFunction* bytecode_read(const char* path) {
         fclose(f);
         return nullptr;
     }
+
+    /* Configs */
+    extern bool global_allow_leaks;
+    global_allow_leaks = (read_u8(f) == 1);
+    extern bool global_autofree;
+    global_autofree = (read_u8(f) == 1);
 
     ObjFunction* script = read_function(f);
     fclose(f);

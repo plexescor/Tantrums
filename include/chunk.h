@@ -50,6 +50,7 @@ typedef enum {
     OP_CLONE,
     OP_ENTER_SCOPE,
     OP_EXIT_SCOPE,
+    OP_MARK_ESCAPED,
     OP_HALT,
 } OpCode;
 

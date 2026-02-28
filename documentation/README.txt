@@ -83,7 +83,7 @@
   appropriate for a file containing code that is supposed to do something useful.
 
   AHH is the sound you make when you look at your own code three days after
-  writing it and have absolutely no idea what's happening.
+  writing it and have absolutely no idea what's happening. (foreshadowing)
 
   .42ass — Compiled bytecode files
   ─────────────────────────────────

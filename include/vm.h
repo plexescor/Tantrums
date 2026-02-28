@@ -42,6 +42,7 @@ struct VM {
     int       handler_count;
     int       scope_depth;
     Value*    scope_base_slots[MAX_LOCAL_SCOPES];
+    Obj*      scope_alloc_markers[MAX_LOCAL_SCOPES];
     AutoFreeRecord* auto_free_records;
     int       auto_free_capacity;
     int       auto_free_count;
