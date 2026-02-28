@@ -270,16 +270,21 @@ static bool num_div(VM* vm, Value a, Value b, Value* out) {
     return true;
 }
 static bool num_mod(VM* vm, Value a, Value b, Value* out) {
-    if (IS_INT(a) && IS_INT(b)) {
-        if (AS_INT(b) == 0) {
-            vm_runtime_error(vm, "Modulo by zero.");
-            return false;
-        }
-        *out = INT_VAL(AS_INT(a) % AS_INT(b));
-        return true;
-    }
-    vm_runtime_error(vm, "Modulo operands must be integers.");
-    return false;
+    /* Coerce floats that are whole numbers to int for modulo */
+    int64_t ia, ib;
+    if (IS_INT(a)) ia = AS_INT(a);
+    else if (IS_FLOAT(a) && AS_FLOAT(a) == (int64_t)AS_FLOAT(a)) ia = (int64_t)AS_FLOAT(a);
+    else { vm_runtime_error(vm, "Modulo operands must be integers (got float '%g').", value_as_number(a)); return false; }
+    if (IS_INT(b)) ib = AS_INT(b);
+    else if (IS_FLOAT(b) && AS_FLOAT(b) == (int64_t)AS_FLOAT(b)) ib = (int64_t)AS_FLOAT(b);
+    else { vm_runtime_error(vm, "Modulo operands must be integers (got float '%g').", value_as_number(b)); return false; }
+    if (ib == 0) { vm_runtime_error(vm, "Modulo by zero."); return false; }
+    *out = INT_VAL(ia % ib);
+    return true;
+}
+
+static int64_t range_length(ObjRange* r) {
+    return r->length;
 }
 
 static bool call_value(VM* vm, Value callee, int argc) {
@@ -319,7 +324,8 @@ static InterpretResult run(VM* vm) {
 
 #define READ_BYTE() (*frame->ip++)
 #define READ_SHORT() (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
-#define READ_CONSTANT() (frame->function->chunk->constants[READ_BYTE()])
+#define READ_CONST_IDX() (frame->ip += 2, (uint16_t)(frame->ip[-2] | ((uint16_t)frame->ip[-1] << 8)))
+#define READ_CONSTANT() (frame->function->chunk->constants[READ_CONST_IDX()])
 
     for (;;) {
         uint8_t instruction = READ_BYTE();
@@ -333,47 +339,79 @@ static InterpretResult run(VM* vm) {
             Value b = vm_peek(vm, 0);
             Value a = vm_peek(vm, 1);
             if (IS_STRING(a) && IS_STRING(b)) {
-                Value res = OBJ_VAL(obj_string_concat(AS_STRING(a), AS_STRING(b)));
-                vm->stack_top -= 2;
-                vm_push(vm, res);
+                /* Fast path: if `a` is a mutable string exclusively owned on the stack,
+                 * append b directly into it — zero allocation. */
+                ObjString* sa = AS_STRING(a);
+                ObjString* sb = AS_STRING(b);
+                if (sa->is_mutable && sa->obj.refcount == 1) {
+                    obj_string_append(sa, sb->chars, sb->length);
+                    vm->stack_top--; /* pop b, leave a (now extended) on stack */
+                } else {
+                    Value res = OBJ_VAL(obj_string_concat(sa, sb));
+                    vm->stack_top -= 2;
+                    vm_push(vm, res);
+                }
             } else if (IS_STRING(a) || IS_STRING(b)) {
-                /* Auto-convert non-string side to string */
-                char buf[128];
-                ObjString* sa = nullptr;
-                ObjString* sb = nullptr;
+                /* Auto-convert non-string side — separate bufs, no shared state */
+                char bufa[64], bufb[64];
+                ObjString* sa;
+                ObjString* sb;
                 if (!IS_STRING(a)) {
-                    if (IS_INT(a)) snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(a));
-                    else if (IS_FLOAT(a)) snprintf(buf, sizeof(buf), "%g", AS_FLOAT(a));
-                    else if (IS_BOOL(a)) snprintf(buf, sizeof(buf), "%s", AS_BOOL(a) ? "true" : "false");
-                    else snprintf(buf, sizeof(buf), "null");
-                    sa = obj_string_new(buf, (int)strlen(buf));
-                    sa->obj.is_manual = true; // Protect sa
+                    if (IS_INT(a)) snprintf(bufa, sizeof(bufa), "%lld", (long long)AS_INT(a));
+                    else if (IS_FLOAT(a)) {
+                        snprintf(bufa, sizeof(bufa), "%.10f", AS_FLOAT(a));
+                        char* dot = strchr(bufa, '.');
+                        if (dot) { char* end = bufa + strlen(bufa) - 1; while (end > dot + 1 && *end == '0') end--; *(end + 1) = '\0'; }
+                    }
+                    else if (IS_BOOL(a)) snprintf(bufa, sizeof(bufa), "%s", AS_BOOL(a) ? "true" : "false");
+                    else snprintf(bufa, sizeof(bufa), "null");
+                    sa = obj_string_new(bufa, (int)strlen(bufa));
+                    sa->is_mutable = true; /* new temp string, safe to mutate */
                 } else {
                     sa = AS_STRING(a);
                 }
-                
                 if (!IS_STRING(b)) {
-                    if (IS_INT(b)) snprintf(buf, sizeof(buf), "%lld", (long long)AS_INT(b));
-                    else if (IS_FLOAT(b)) snprintf(buf, sizeof(buf), "%g", AS_FLOAT(b));
-                    else if (IS_BOOL(b)) snprintf(buf, sizeof(buf), "%s", AS_BOOL(b) ? "true" : "false");
-                    else snprintf(buf, sizeof(buf), "null");
-                    sb = obj_string_new(buf, (int)strlen(buf));
+                    if (IS_INT(b)) snprintf(bufb, sizeof(bufb), "%lld", (long long)AS_INT(b));
+                    else if (IS_FLOAT(b)) {
+                        snprintf(bufb, sizeof(bufb), "%.10f", AS_FLOAT(b));
+                        char* dot = strchr(bufb, '.');
+                        if (dot) { char* end = bufb + strlen(bufb) - 1; while (end > dot + 1 && *end == '0') end--; *(end + 1) = '\0'; }
+                    }
+                    else if (IS_BOOL(b)) snprintf(bufb, sizeof(bufb), "%s", AS_BOOL(b) ? "true" : "false");
+                    else snprintf(bufb, sizeof(bufb), "null");
+                    sb = obj_string_new(bufb, (int)strlen(bufb));
                 } else {
                     sb = AS_STRING(b);
                 }
-                
                 Value res = OBJ_VAL(obj_string_concat(sa, sb));
-                
-                if (!IS_STRING(a)) sa->obj.is_manual = false; // Unprotect sa
-                
                 vm->stack_top -= 2;
                 vm_push(vm, res);
-            } else if (IS_LIST(a) && IS_LIST(b)) {
-                ObjList* result = obj_list_new(); // result is not on stack yet, protect
+            } else if ((IS_LIST(a) || IS_RANGE(a)) && (IS_LIST(b) || IS_RANGE(b))) {
+                ObjList* result = obj_list_new();
                 result->obj.is_manual = true;
-                ObjList* la = AS_LIST(a); ObjList* lb = AS_LIST(b);
-                for (int i = 0; i < la->count; i++) obj_list_append(result, la->items[i]);
-                for (int i = 0; i < lb->count; i++) obj_list_append(result, lb->items[i]);
+                
+                // Append from a
+                if (IS_LIST(a)) {
+                    ObjList* la = AS_LIST(a);
+                    for (int i = 0; i < la->count; i++) obj_list_append(result, la->items[i]);
+                } else {
+                    ObjRange* ra = AS_RANGE(a);
+                    for (int64_t i = 0; i < ra->length; i++) {
+                        obj_list_append(result, INT_VAL(ra->start + i * ra->step));
+                    }
+                }
+
+                // Append from b
+                if (IS_LIST(b)) {
+                    ObjList* lb = AS_LIST(b);
+                    for (int i = 0; i < lb->count; i++) obj_list_append(result, lb->items[i]);
+                } else {
+                    ObjRange* rb = AS_RANGE(b);
+                    for (int64_t i = 0; i < rb->length; i++) {
+                        obj_list_append(result, INT_VAL(rb->start + i * rb->step));
+                    }
+                }
+                
                 result->obj.is_manual = false;
                 vm->stack_top -= 2;
                 vm_push(vm, OBJ_VAL(result));
@@ -478,11 +516,20 @@ static InterpretResult run(VM* vm) {
 
         case OP_CALL: {
             int argc = READ_BYTE();
+            Value callee = vm_peek(vm, argc);
+            /* Fast path: inline native calls — no frame allocation, no escape scan */
+            if (IS_NATIVE(callee)) {
+                Value result = AS_NATIVE(callee)->function(vm, argc, vm->stack_top - argc);
+                vm->stack_top -= argc + 1;
+                vm_push(vm, result);
+                break;
+            }
+            /* Escape scan only needed when passing pointers */
             for (int i = 0; i < argc; i++) {
                 Value arg = vm_peek(vm, i);
                 if (IS_POINTER(arg)) AS_POINTER(arg)->escaped = true;
             }
-            if (!call_value(vm, vm_peek(vm, argc), argc)) return INTERPRET_RUNTIME_ERROR;
+            if (!call_value(vm, callee, argc)) return INTERPRET_RUNTIME_ERROR;
             frame = &vm->frames[vm->frame_count - 1];
         } break;
 
@@ -533,7 +580,13 @@ static InterpretResult run(VM* vm) {
     Value idx = vm_peek(vm, 0);
     Value obj = vm_peek(vm, 1);
     Value result = NULL_VAL;
-    if (IS_LIST(obj) && IS_INT(idx)) {
+    if (IS_RANGE(obj) && IS_INT(idx)) {
+        ObjRange* r = (ObjRange*)AS_OBJ(obj);
+        int64_t i = AS_INT(idx);
+        if (i >= 0 && i < r->length) {
+            result = INT_VAL(r->start + i * r->step);
+        }
+    } else if (IS_LIST(obj) && IS_INT(idx)) {
         ObjList* l = AS_LIST(obj);
         int i = (int)AS_INT(idx);
         if (i < 0 || i >= l->count) { result = NULL_VAL; }
@@ -595,6 +648,7 @@ static InterpretResult run(VM* vm) {
             if (IS_STRING(v)) vm_push(vm, INT_VAL(AS_STRING(v)->length));
             else if (IS_LIST(v)) vm_push(vm, INT_VAL(AS_LIST(v)->count));
             else if (IS_MAP(v)) vm_push(vm, INT_VAL(AS_MAP(v)->count));
+            else if (IS_RANGE(v)) vm_push(vm, INT_VAL(range_length(AS_RANGE(v))));
             else vm_push(vm, INT_VAL(0));
         } break;
 
@@ -633,7 +687,7 @@ static InterpretResult run(VM* vm) {
             ptr->alloc_type = type_str;
             ptr->auto_manage = (READ_BYTE() == 1);
             ptr->alloc_func = frame->function->name;
-            int offset = (int)(frame->ip - frame->function->chunk->code - 3); // -3 because constant offset and auto_manage byte
+            int offset = (int)(frame->ip - frame->function->chunk->code - 4); // -4: 2-byte constant index + 1 auto_manage byte, back to the OP_ALLOC itself
             ptr->alloc_line = frame->function->chunk->lines[offset];
             ptr->scope_depth = vm->scope_depth;
             ptr->escaped = false;
@@ -746,7 +800,10 @@ static InterpretResult run(VM* vm) {
                     result = OBJ_VAL(obj_string_new(buf, (int)strlen(buf)));
                 }
                 else if (IS_FLOAT(v)) {
-                    char buf[64]; snprintf(buf, sizeof(buf), "%g", AS_FLOAT(v));
+                    char buf[64]; 
+                    snprintf(buf, sizeof(buf), "%.10f", AS_FLOAT(v));
+                    char* dot = strchr(buf, '.');
+                    if (dot) { char* end = buf + strlen(buf) - 1; while (end > dot + 1 && *end == '0') end--; *(end + 1) = '\0'; }
                     result = OBJ_VAL(obj_string_new(buf, (int)strlen(buf)));
                 }
                 else if (IS_BOOL(v)) {
@@ -844,6 +901,37 @@ static InterpretResult run(VM* vm) {
             /* Try block completed normally — pop handler */
             if (vm->handler_count > 0) vm->handler_count--;
         } break;
+
+        case OP_FOR_IN_STEP: {
+            uint8_t iter_slot = READ_BYTE();
+            uint8_t length_slot = READ_BYTE();
+            uint8_t counter_slot = READ_BYTE();
+            
+            Value iter_val = frame->slots[iter_slot];
+            int64_t counter = AS_INT(frame->slots[counter_slot]);
+            int64_t length = AS_INT(frame->slots[length_slot]);
+            
+            if (counter < length) {
+                Value element;
+                if (IS_RANGE(iter_val)) {
+                    ObjRange* r = AS_RANGE(iter_val);
+                    element = INT_VAL(r->start + counter * r->step);
+                } else if (IS_LIST(iter_val)) {
+                    element = AS_LIST(iter_val)->items[counter];
+                } else if (IS_STRING(iter_val)) {
+                    element = OBJ_VAL(obj_string_new(&(AS_STRING(iter_val)->chars[counter]), 1));
+                } else {
+                    element = NULL_VAL;
+                }
+                
+                frame->slots[counter_slot] = INT_VAL(counter + 1);
+                vm_push(vm, element);          // Loop variable value
+                vm_push(vm, BOOL_VAL(true));  // Continue bool for JUMP_IF_FALSE
+            } else {
+                vm_push(vm, BOOL_VAL(false)); // Exit bool for JUMP_IF_FALSE
+            }
+            break;
+        }
 
         case OP_HALT: {
             while (vm->scope_depth > 0) vm_exit_scope(vm);

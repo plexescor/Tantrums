@@ -224,18 +224,18 @@ int main(int argc, char* argv[]) {
         }
         file_path = argv[arg_idx];
 
-        printf("DEBUG: read_file\n");
+        // printf("DEBUG: read_file\n");
         char* source = read_file(file_path);
         if (!source) return 1;
 
-        printf("DEBUG: calling compile_source\n");
+        // printf("DEBUG: calling compile_source\n");
         ObjFunction* script = compile_source(source);
         if (!script) {
             fprintf(stderr, "Compilation failed.\n");
             free(source);
             return 1;
         }
-        printf("DEBUG: compiled_source returned\n");
+        // printf("DEBUG: compiled_source returned\n");
 
         /* Generate .42ass file path */
         char* bytecode_path = make_bytecode_path(file_path);

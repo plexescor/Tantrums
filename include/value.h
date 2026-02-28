@@ -10,6 +10,7 @@ typedef struct ObjMap ObjMap;
 typedef struct ObjFunction ObjFunction;
 typedef struct ObjNative ObjNative;
 typedef struct ObjPointer ObjPointer;
+typedef struct ObjRange ObjRange;
 typedef struct Chunk Chunk;
 typedef struct VM VM;
 
@@ -28,7 +29,7 @@ static inline Value OBJ_VAL(void* o)    { Value r; r.type = VAL_OBJ;   r.as.obj 
 static inline Value NULL_VAL_MAKE()     { Value r; r.type = VAL_NULL;  r.as.integer  = 0; return r; }
 #define NULL_VAL NULL_VAL_MAKE()
 
-typedef enum { OBJ_STRING, OBJ_LIST, OBJ_MAP, OBJ_FUNCTION, OBJ_NATIVE, OBJ_POINTER } ObjType;
+typedef enum { OBJ_STRING, OBJ_LIST, OBJ_MAP, OBJ_FUNCTION, OBJ_NATIVE, OBJ_POINTER, OBJ_RANGE } ObjType;
 
 struct Obj        { ObjType type; int refcount; bool is_manual; bool is_marked; Obj* next; };
 struct ObjString  { Obj obj; int length; int capacity; bool is_mutable; char* chars; uint32_t hash; };
@@ -41,6 +42,7 @@ typedef Value (*NativeFn)(VM* vm, int arg_count, Value* args);
 struct ObjNative  { Obj obj; NativeFn function; const char* name; };
 struct ObjFunction{ Obj obj; int arity; Chunk* chunk; ObjString* name; };
 struct ObjPointer { Obj obj; Value* target; bool is_valid; size_t alloc_size; int alloc_line; ObjString* alloc_type; ObjString* alloc_func; int scope_depth; bool escaped; bool auto_manage; };
+struct ObjRange { Obj obj; int64_t start; int64_t end; int64_t step; int64_t length; };
 
 #define IS_INT(v)      ((v).type == VAL_INT)
 #define IS_FLOAT(v)    ((v).type == VAL_FLOAT)
@@ -54,6 +56,7 @@ struct ObjPointer { Obj obj; Value* target; bool is_valid; size_t alloc_size; in
 #define IS_FUNCTION(v) (IS_OBJ(v) && OBJ_TYPE(v) == OBJ_FUNCTION)
 #define IS_NATIVE(v)   (IS_OBJ(v) && OBJ_TYPE(v) == OBJ_NATIVE)
 #define IS_POINTER(v)  (IS_OBJ(v) && OBJ_TYPE(v) == OBJ_POINTER)
+#define IS_RANGE(v)    (IS_OBJ(v) && OBJ_TYPE(v) == OBJ_RANGE)
 
 #define AS_INT(v)      ((v).as.integer)
 #define AS_FLOAT(v)    ((v).as.floating)
@@ -66,6 +69,7 @@ struct ObjPointer { Obj obj; Value* target; bool is_valid; size_t alloc_size; in
 #define AS_FUNCTION(v) ((ObjFunction*)AS_OBJ(v))
 #define AS_NATIVE(v)   ((ObjNative*)AS_OBJ(v))
 #define AS_POINTER(v)  ((ObjPointer*)AS_OBJ(v))
+#define AS_RANGE(v)    ((ObjRange*)AS_OBJ(v))
 
 double       value_as_number(Value v);
 ObjString*   obj_string_new(const char* chars, int length);
@@ -81,6 +85,7 @@ bool         obj_map_get(ObjMap* map, Value key, Value* out);
 ObjFunction* obj_function_new(void);
 ObjNative*   obj_native_new(NativeFn fn, const char* name);
 ObjPointer*  obj_pointer_new(Value* target);
+ObjRange*    obj_range_new(int64_t start, int64_t end, int64_t step);
 void         value_incref(Value v);
 void         value_decref(Value v);
 void         obj_free(Obj* obj);

@@ -51,6 +51,7 @@ typedef enum {
     OP_ENTER_SCOPE,
     OP_EXIT_SCOPE,
     OP_MARK_ESCAPED,
+    OP_FOR_IN_STEP, /* fused loop step for performance */
     OP_HALT,
 } OpCode;
 

@@ -117,6 +117,18 @@ static void prescan_signatures(ASTNode* program) {
                         n->line, n->as.func_decl.name);
                 had_type_error = true;
             }
+            /* STATIC: all params must have type annotations (except main) */
+            if (compile_mode == MODE_STATIC && strcmp(n->as.func_decl.name, "main") != 0) {
+                for (int p = 0; p < n->as.func_decl.param_count; p++) {
+                    if (!n->as.func_decl.params[p].type_name || n->as.func_decl.params[p].type_name[0] == '\0') {
+                        char buf[512];
+                        snprintf(buf, sizeof(buf),
+                                 "Static mode: parameter '%s' of function '%s' must have a type annotation.",
+                                 n->as.func_decl.params[p].name, n->as.func_decl.name);
+                        type_error(n->line, buf);
+                    }
+                }
+            }
             register_func_sig(n->as.func_decl.name, n->as.func_decl.ret_type, n);
         }
     }
@@ -229,8 +241,16 @@ static void check_call_types(ASTNode* call_node) {
     }
     
     if (compile_mode == MODE_DYNAMIC) return; /* skip arity/type in dynamic mode */
-    
-    if (call_node->as.call.arg_count != sig->param_count) return; /* arity checked at runtime */
+
+    /* Arity mismatch: compile-time error in STATIC and BOTH modes */
+    if (call_node->as.call.arg_count != sig->param_count) {
+        char buf[512];
+        snprintf(buf, sizeof(buf),
+                 "Function '%s' expects %d argument(s) but got %d.",
+                 fn_name, sig->param_count, call_node->as.call.arg_count);
+        type_error(call_node->line, buf);
+        return;
+    }
     for (int i = 0; i < call_node->as.call.arg_count && i < sig->param_count; i++) {
         if (!sig->param_types[i][0]) continue; /* untyped param */
         const char* arg_type = infer_expr_type(call_node->as.call.args[i]);
@@ -271,13 +291,27 @@ static void emit_loop(int line, int loop_start) {
     emit_byte(line, offset & 0xff);
 }
 
-static uint8_t make_constant(Value val) {
+static uint16_t make_constant(Value val) {
     int idx = chunk_add_constant(current_chunk(), val);
-    return (uint8_t)idx;
+    if (idx > 65535) {
+        fprintf(stderr, "Error: too many constants in function (limit 65535).\n");
+        return 0;
+    }
+    return (uint16_t)idx;
 }
 
+/* Emit OP_CONSTANT followed by 2-byte little-endian index */
 static void emit_constant(int line, Value val) {
-    emit_bytes(line, OP_CONSTANT, make_constant(val));
+    uint16_t idx = make_constant(val);
+    emit_byte(line, OP_CONSTANT);
+    emit_byte(line, (uint8_t)(idx & 0xff));
+    emit_byte(line, (uint8_t)((idx >> 8) & 0xff));
+}
+
+/* Emit a 2-byte constant index inline (for opcodes that embed a constant ref) */
+static void emit_constant_index(int line, uint16_t idx) {
+    emit_byte(line, (uint8_t)(idx & 0xff));
+    emit_byte(line, (uint8_t)((idx >> 8) & 0xff));
 }
 
 /* ── Scope management ─────────────────────────────── */
@@ -382,7 +416,8 @@ static void compile_expr(ASTNode* node) {
             emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)slot);
         } else {
             ObjString* name = obj_string_new(node->as.identifier.name, node->as.identifier.length);
-            emit_bytes(node->line, OP_GET_GLOBAL, make_constant(OBJ_VAL(name)));
+            emit_byte(node->line, OP_GET_GLOBAL);
+            emit_constant_index(node->line, make_constant(OBJ_VAL(name)));
         }
     } break;
 
@@ -508,7 +543,7 @@ static void compile_expr(ASTNode* node) {
         emit_byte(node->line, OP_ALLOC);
         const char* type_name = node->as.alloc_expr.type_name ? node->as.alloc_expr.type_name : "dynamic";
         ObjString* type_str = obj_string_new(type_name, (int)strlen(type_name));
-        emit_byte(node->line, make_constant(OBJ_VAL(type_str)));
+        emit_constant_index(node->line, make_constant(OBJ_VAL(type_str)));
         emit_byte(node->line, compile_autofree_enabled ? 1 : 0);
         break;
     }
@@ -531,7 +566,8 @@ static void compile_expr(ASTNode* node) {
                 emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
             } else {
                 ObjString* name = obj_string_new(node->as.postfix.operand->as.identifier.name, node->as.postfix.operand->as.identifier.length);
-                emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
+                emit_byte(node->line, OP_SET_GLOBAL);
+                emit_constant_index(node->line, make_constant(OBJ_VAL(name)));
             }
             /* 4. Pop new value, leaving the OLD value generated in step 1 on top of the stack! */
             emit_byte(node->line, OP_POP);
@@ -542,35 +578,49 @@ static void compile_expr(ASTNode* node) {
     } break;
 
     case NODE_ASSIGN: {
-        /* STATIC mode: error if assigning to undeclared (untyped) variable */
-        if (compile_mode == MODE_STATIC) {
-            int s = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
-            if (s == -1) {
+        /* ── Mode-aware undeclared variable check ──────────────────────────────
+         *
+         *  STATIC:  bare assignment to any undeclared name is a hard error.
+         *           Every variable must be declared with an explicit type first.
+         *
+         *  BOTH:    if the name already exists (local or global) → normal
+         *           reassignment with type checking on typed vars.
+         *           If the name is NEW → implicit global variable is created
+         *           (dynamic "duck-typed" variable, no type annotation).
+         *
+         *  DYNAMIC: same as BOTH for undeclared names.  Type checking on
+         *           existing typed locals is also skipped entirely.
+         * ─────────────────────────────────────────────────────────────────── */
+
+        int pre_slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
+        bool pre_global = is_global_tracked(node->as.assign.name);
+
+        if (compile_mode == MODE_STATIC && pre_slot == -1 && !pre_global) {
+            /* STATIC: undeclared → hard error */
+            char buf[512];
+            snprintf(buf, sizeof(buf),
+                     "Static mode: variable '%s' must be declared with a type before assignment "
+                     "(e.g. 'int %s = ...').",
+                     node->as.assign.name, node->as.assign.name);
+            type_error(node->line, buf);
+        }
+
+        /* Type check assignment to an existing TYPED local (STATIC + BOTH, not DYNAMIC) */
+        if (compile_mode != MODE_DYNAMIC && pre_slot != -1 && current->locals[pre_slot].type_name[0]) {
+            const char* val_type = infer_expr_type(node->as.assign.value);
+            if (val_type && !types_compatible(current->locals[pre_slot].type_name, val_type)) {
                 char buf[512];
                 snprintf(buf, sizeof(buf),
-                         "Static mode: variable '%s' must be declared with a type (e.g., int %s = ...).",
-                         node->as.assign.name, node->as.assign.name);
+                         "Cannot assign '%s' to '%s' variable '%s'.",
+                         val_type, current->locals[pre_slot].type_name, node->as.assign.name);
                 type_error(node->line, buf);
             }
         }
 
-        /* Type check assignment to typed local (skip in DYNAMIC mode) */
-        if (compile_mode != MODE_DYNAMIC) {
-            int check_slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
-            if (check_slot != -1 && current->locals[check_slot].type_name[0]) {
-                const char* val_type = infer_expr_type(node->as.assign.value);
-                if (val_type && !types_compatible(current->locals[check_slot].type_name, val_type)) {
-                    char buf[512];
-                    snprintf(buf, sizeof(buf),
-                             "Cannot assign '%s' value to '%s' variable '%s'.",
-                             val_type, current->locals[check_slot].type_name, node->as.assign.name);
-                    type_error(node->line, buf);
-                }
-            }
-        }
         compile_expr(node->as.assign.value);
         int slot = resolve_local(current, node->as.assign.name, (int)strlen(node->as.assign.name));
-        
+
+        /* Pointer leak tracking for existing locals */
         if (slot != -1) {
             if (current->locals[slot].holds_alloc) {
                 if (compile_allow_leaks_enabled) {
@@ -583,34 +633,32 @@ static void compile_expr(ASTNode* node) {
             }
             if (node->as.assign.value && node->as.assign.value->type == NODE_ALLOC) {
                 current->locals[slot].holds_alloc = true;
-            } else if (node->as.assign.value && node->as.assign.value->type == NODE_CALL && node->as.assign.value->as.call.callee->type == NODE_IDENTIFIER) {
+            } else if (node->as.assign.value && node->as.assign.value->type == NODE_CALL &&
+                       node->as.assign.value->as.call.callee->type == NODE_IDENTIFIER) {
                 FuncSig* sig = find_func_sig(node->as.assign.value->as.call.callee->as.identifier.name);
-                if (sig && is_pointer_type(sig->ret_type)) {
-                    current->locals[slot].holds_alloc = true;
-                } else {
-                    current->locals[slot].holds_alloc = false;
-                }
+                current->locals[slot].holds_alloc = (sig && is_pointer_type(sig->ret_type));
             } else {
                 current->locals[slot].holds_alloc = false;
             }
         }
-        
+
         if (slot != -1) {
-            /* Reassign existing local — set, leaves copy on stack */
+            /* Existing local — OP_SET_LOCAL, leaves value on stack (caller pops) */
             emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)slot);
         } else if (is_global_tracked(node->as.assign.name)) {
-            /* Reassign existing global */
+            /* Existing global */
             ObjString* name = obj_string_new(node->as.assign.name, (int)strlen(node->as.assign.name));
-            emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
-        } else if (current->scope_depth > 0) {
-            /* Inside a function: create a new local variable. */
-            int new_slot = add_local(node->as.assign.name, (int)strlen(node->as.assign.name));
-            emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)new_slot);
+            emit_byte(node->line, OP_SET_GLOBAL);
+            emit_constant_index(node->line, make_constant(OBJ_VAL(name)));
+        } else if (compile_mode == MODE_STATIC) {
+            /* STATIC + not found: already errored above, emit pop to keep stack balanced */
+            emit_byte(node->line, OP_POP);
         } else {
-            /* Top-level: create/update a global */
+            /* BOTH / DYNAMIC: new name → implicit dynamic global variable. */
             track_global(node->as.assign.name);
             ObjString* name = obj_string_new(node->as.assign.name, (int)strlen(node->as.assign.name));
-            emit_bytes(node->line, OP_SET_GLOBAL, make_constant(OBJ_VAL(name)));
+            emit_byte(node->line, OP_SET_GLOBAL);
+            emit_constant_index(node->line, make_constant(OBJ_VAL(name)));
         }
     } break;
 
@@ -900,6 +948,15 @@ static void compile_node(ASTNode* node) {
             }
         }
 
+        /* STATIC mode: every variable declaration must have a type annotation */
+        if (compile_mode == MODE_STATIC && !node->as.var_decl.type_name) {
+            char buf[512];
+            snprintf(buf, sizeof(buf),
+                     "Static mode: variable '%s' must have a type annotation (e.g. 'int %s = ...').",
+                     node->as.var_decl.name, node->as.var_decl.name);
+            type_error(node->line, buf);
+        }
+
         /* Type check: if typed and init has inferable type, verify (skip in DYNAMIC mode) */
         if (compile_mode != MODE_DYNAMIC && node->as.var_decl.type_name && node->as.var_decl.init) {
             bool is_ptr = node->as.var_decl.init->type == NODE_ALLOC;
@@ -968,7 +1025,8 @@ static void compile_node(ASTNode* node) {
         } else {
             track_global(node->as.var_decl.name);
             ObjString* name = obj_string_new(node->as.var_decl.name, (int)strlen(node->as.var_decl.name));
-            emit_bytes(node->line, OP_DEFINE_GLOBAL, make_constant(OBJ_VAL(name)));
+            emit_byte(node->line, OP_DEFINE_GLOBAL);
+            emit_constant_index(node->line, make_constant(OBJ_VAL(name)));
         }
     } break;
 
@@ -1098,6 +1156,12 @@ static void compile_node(ASTNode* node) {
         begin_scope();
         compile_expr(node->as.for_in.iterable);
         int iterable_slot = add_local("$iter", 5);
+        
+        /* Hidden length cache: $len = len($iter) */
+        emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)iterable_slot);
+        emit_byte(node->line, OP_LEN);
+        int length_slot = add_local("$len", 4);
+
         emit_constant(node->line, INT_VAL(0));
         int counter_slot = add_local("$idx", 4);
         /* Loop variable */
@@ -1105,20 +1169,20 @@ static void compile_node(ASTNode* node) {
         int var_slot = add_local(node->as.for_in.var_name, (int)strlen(node->as.for_in.var_name));
 
         int loop_start = current_chunk()->count;
-        /* Check: counter < len(iterable) */
-        emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)counter_slot);
-        emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)iterable_slot);
-        emit_byte(node->line, OP_LEN);
-        emit_byte(node->line, OP_LT);
+        /* OP_FOR_IN_STEP needs to know where the locals are.
+           We'll use a versions that takes local slots as operands. */
+        emit_byte(node->line, OP_FOR_IN_STEP);
+        emit_byte(node->line, (uint8_t)iterable_slot);
+        emit_byte(node->line, (uint8_t)length_slot);
+        emit_byte(node->line, (uint8_t)counter_slot);
+        
+        /* Stack now: ... continue_bool at top, value below it */
         int exit_jump = emit_jump(node->line, OP_JUMP_IF_FALSE);
-        emit_byte(node->line, OP_POP);
+        emit_byte(node->line, OP_POP); // Pop continue_bool
 
-        /* var = iterable[counter] */
-        emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)iterable_slot);
-        emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)counter_slot);
-        emit_byte(node->line, OP_INDEX_GET);
+        /* Store loop value: var = value */
         emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)var_slot);
-        emit_byte(node->line, OP_POP);
+        emit_byte(node->line, OP_POP); // Pop the value of SET_LOCAL
 
         Loop loop;
         loop.enclosing = current_loop;
@@ -1132,16 +1196,11 @@ static void compile_node(ASTNode* node) {
         /* Body */
         compile_node(node->as.for_in.body);
 
-        /* counter++ */
+        /* Patch continue jumps — they land here, just before OP_LOOP.
+           Counter increment is handled inside OP_FOR_IN_STEP, not here. */
         for (int i = 0; i < loop.continue_count; i++) {
             patch_jump(loop.continues[i]);
         }
-
-        emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)counter_slot);
-        emit_constant(node->line, INT_VAL(1));
-        emit_byte(node->line, OP_ADD);
-        emit_bytes(node->line, OP_SET_LOCAL, (uint8_t)counter_slot);
-        emit_byte(node->line, OP_POP);
 
         emit_loop(node->line, loop_start);
         patch_jump(exit_jump);
@@ -1188,26 +1247,29 @@ static void compile_node(ASTNode* node) {
         bool has_return = has_guaranteed_return(body);
         compile_node(body);
 
-        /* RULE 3 & 4: non-void functions must return the declared type on all paths in static mode */
-        if (compile_mode == MODE_STATIC && comp.ret_type[0] && strcmp(comp.ret_type, "void") != 0) {
+        /* RULE 3 & 4: return type enforcement by mode
+         *   STATIC  → hard error if non-void typed function lacks guaranteed return on all paths
+         *   BOTH    → warning (typed return declared but may fall through and return null)
+         *   DYNAMIC → warning only if a return type was explicitly annotated */
+        if (comp.ret_type[0] && strcmp(comp.ret_type, "void") != 0 &&
+            strcmp(comp.ret_type, "null") != 0) {
             if (!has_return) {
                 char buf[512];
-                if (strstr(body->as.block.nodes[body->as.block.count-1]->type == NODE_IF ? "" : "", "")) {} // dummy
-                /* We need to distinguish between "no return at all" and "not all paths" */
                 if (!has_any_return(body)) {
-                    snprintf(buf, sizeof(buf), "function '%s' declared '%s' but has no return statement.", 
+                    snprintf(buf, sizeof(buf),
+                             "function '%s' declared '%s' but has no return statement.",
                              node->as.func_decl.name, comp.ret_type);
                 } else {
-                    snprintf(buf, sizeof(buf), "function '%s' not all code paths return a value.", 
+                    snprintf(buf, sizeof(buf),
+                             "function '%s' does not return a value on all code paths.",
                              node->as.func_decl.name);
                 }
-                type_error(node->line, buf);
+                if (compile_mode == MODE_STATIC) {
+                    type_error(node->line, buf);          /* hard error */
+                } else {
+                    fprintf(stderr, "[Line %d] Warning: %s\n", node->line, buf); /* warning */
+                }
             }
-        } else if (!has_return && node->as.func_decl.ret_type && 
-            strcmp(node->as.func_decl.ret_type, "null") != 0 &&
-            strcmp(node->as.func_decl.ret_type, "void") != 0) {
-            fprintf(stderr, "[Line %d] Warning: Function '%s' is typed as '%s' but may lack a return statement.\n", 
-                    node->line, node->as.func_decl.name, node->as.func_decl.ret_type);
         }
 
         /* Implicit return null */
@@ -1222,7 +1284,8 @@ static void compile_node(ASTNode* node) {
             add_local(node->as.func_decl.name, (int)strlen(node->as.func_decl.name));
         } else {
             ObjString* name = obj_string_new(node->as.func_decl.name, (int)strlen(node->as.func_decl.name));
-            emit_bytes(node->line, OP_DEFINE_GLOBAL, make_constant(OBJ_VAL(name)));
+            emit_byte(node->line, OP_DEFINE_GLOBAL);
+            emit_constant_index(node->line, make_constant(OBJ_VAL(name)));
         }
     } break;
 
@@ -1262,12 +1325,22 @@ static void compile_node(ASTNode* node) {
                 /* Returning pointer from non-pointer return type -> Warning */
                 fprintf(stderr, "[Tantrums Warning] line %d: returning pointer from non-pointer return type — caller cannot free this pointer\n", node->line);
             } else if (compile_mode == MODE_STATIC) {
-                /* Normal type check in static mode */
+                /* STATIC: hard error on return type mismatch */
                 if (!types_compatible(current->ret_type, actual)) {
                     char buf[512];
-                    snprintf(buf, sizeof(buf), "return type mismatch in '%s': expected '%s' got '%s'.", 
-                             (const char*)current->function->name->chars, current->ret_type, actual ? actual : "dynamic");
+                    snprintf(buf, sizeof(buf),
+                             "return type mismatch in '%s': expected '%s' got '%s'.",
+                             (const char*)current->function->name->chars,
+                             current->ret_type, actual ? actual : "dynamic");
                     type_error(node->line, buf);
+                }
+            } else if (compile_mode == MODE_BOTH && actual) {
+                /* BOTH: warn on inferable mismatch (actual is known, not dynamic) */
+                if (!types_compatible(current->ret_type, actual)) {
+                    fprintf(stderr,
+                            "[Line %d] Warning: return type mismatch in '%s': declared '%s' but returning '%s'.\n",
+                            node->line, (const char*)current->function->name->chars,
+                            current->ret_type, actual);
                 }
             }
         }
@@ -1388,8 +1461,26 @@ static void compile_node(ASTNode* node) {
 
 
     case NODE_PROGRAM:
-        for (int i = 0; i < node->as.program.count; i++)
-            compile_node(node->as.program.nodes[i]);
+        for (int i = 0; i < node->as.program.count; i++) {
+            ASTNode* n = node->as.program.nodes[i];
+            switch (n->type) {
+            case NODE_VAR_DECL:
+            case NODE_FUNC_DECL:
+            case NODE_AUTOFREE:
+            case NODE_ALLOW_LEAKS:
+            case NODE_USE:
+                compile_node(n);
+                break;
+            default:
+                fprintf(stderr,
+                        "[Line %d] Error: Executable statement at top level is not allowed. "
+                        "Only variable declarations and function definitions are permitted "
+                        "outside functions. Put this code inside 'main' or another function.\n",
+                        n->line);
+                had_type_error = true;
+                break;
+            }
+        }
         break;
 
     case NODE_TRY_CATCH: {
@@ -1481,7 +1572,8 @@ ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
     /* Pre-scan to collect function signatures for type checking */
     prescan_signatures(program);
     if (!find_func_sig("main")) {
-        fprintf(stderr, "Warning: NO MAIN FUNCTION\n");
+        fprintf(stderr, "Error: No 'main' function found. Every Tantrums program must define a 'main' function.\n");
+        return nullptr;
     }
 
     ObjFunction* fn = obj_function_new();

@@ -15,6 +15,13 @@
 #include <stdio.h>
 #endif
 
+/* Helper: extract a numeric value as double from int or float */
+static inline bool get_number(Value v, double* out) {
+    if (IS_INT(v))   { *out = (double)AS_INT(v);   return true; }
+    if (IS_FLOAT(v)) { *out = AS_FLOAT(v);          return true; }
+    return false;
+}
+
 /* print(x) — prints value followed by newline */
 static Value native_print(VM* vm, int argc, Value* args) {
     (void)vm;
@@ -50,44 +57,32 @@ static Value native_len(VM* vm, int argc, Value* args) {
     return INT_VAL(0);
 }
 
-/* range([start], end, [step]) — returns list [start, start+step, ..., end) */
+/* range([start], end, [step]) — returns range object [start, start+step, ..., end) */
 static Value native_range(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || argc > 3) return OBJ_VAL(obj_list_new());
+    if (argc < 1 || argc > 3) return OBJ_VAL(obj_range_new(0, 0, 1));
 
     int64_t start = 0;
     int64_t end = 0;
     int64_t step = 1;
 
     if (argc == 1) {
-        if (!IS_INT(args[0])) return OBJ_VAL(obj_list_new());
+        if (!IS_INT(args[0])) return OBJ_VAL(obj_range_new(0, 0, 1));
         end = AS_INT(args[0]);
     } else if (argc == 2) {
-        if (!IS_INT(args[0]) || !IS_INT(args[1])) return OBJ_VAL(obj_list_new());
+        if (!IS_INT(args[0]) || !IS_INT(args[1])) return OBJ_VAL(obj_range_new(0, 0, 1));
         start = AS_INT(args[0]);
         end = AS_INT(args[1]);
     } else if (argc == 3) {
-        if (!IS_INT(args[0]) || !IS_INT(args[1]) || !IS_INT(args[2])) return OBJ_VAL(obj_list_new());
+        if (!IS_INT(args[0]) || !IS_INT(args[1]) || !IS_INT(args[2])) return OBJ_VAL(obj_range_new(0, 0, 1));
         start = AS_INT(args[0]);
         end = AS_INT(args[1]);
         step = AS_INT(args[2]);
     }
 
-    if (step == 0) return OBJ_VAL(obj_list_new()); // Prevent infinite loops
+    if (step == 0) return OBJ_VAL(obj_range_new(0, 0, 1)); // Prevent infinite loops
 
-    ObjList* list = obj_list_new();
-    
-    if (step > 0) {
-        for (int64_t i = start; i < end; i += step) {
-            obj_list_append(list, INT_VAL(i));
-        }
-    } else {
-        for (int64_t i = start; i > end; i += step) {
-            obj_list_append(list, INT_VAL(i));
-        }
-    }
-    
-    return OBJ_VAL(list);
+    return OBJ_VAL(obj_range_new(start, end, step));
 }
 
 /* type(x) — returns type name as string */
@@ -109,7 +104,7 @@ static Value native_append(VM* vm, int argc, Value* args) {
 
 /* ── Time API ─────────────────────────────────────── */
 
-/* getCurrentTime() -> int (milliseconds sequence Unix Epoch) */
+/* getCurrentTime() -> int (milliseconds since Unix Epoch) */
 static Value native_getCurrentTime(VM* vm, int argc, Value* args) {
     (void)vm; (void)argc; (void)args;
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -118,32 +113,36 @@ static Value native_getCurrentTime(VM* vm, int argc, Value* args) {
     return INT_VAL((int64_t)ms);
 }
 
-/* toSeconds(delta_ms) -> float */
+/* toSeconds(delta_ms) -> float — accepts int or float */
 static Value native_toSeconds(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
-    return FLOAT_VAL((double)AS_INT(args[0]) / 1000.0);
+    double ms;
+    if (argc < 1 || !get_number(args[0], &ms)) return FLOAT_VAL(0.0);
+    return FLOAT_VAL(ms / 1000.0);
 }
 
-/* toMilliseconds(delta_ms) -> int */
+/* toMilliseconds(delta_ms) -> float — accepts int or float */
 static Value native_toMilliseconds(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return INT_VAL(0);
-    return INT_VAL(AS_INT(args[0]));
+    double ms;
+    if (argc < 1 || !get_number(args[0], &ms)) return FLOAT_VAL(0.0);
+    return FLOAT_VAL(ms);
 }
 
-/* toMinutes(delta_ms) -> float */
+/* toMinutes(delta_ms) -> float — accepts int or float */
 static Value native_toMinutes(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
-    return FLOAT_VAL((double)AS_INT(args[0]) / 60000.0);
+    double ms;
+    if (argc < 1 || !get_number(args[0], &ms)) return FLOAT_VAL(0.0);
+    return FLOAT_VAL(ms / 60000.0);
 }
 
-/* toHours(delta_ms) -> float */
+/* toHours(delta_ms) -> float — accepts int or float */
 static Value native_toHours(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
-    return FLOAT_VAL((double)AS_INT(args[0]) / 3600000.0);
+    double ms;
+    if (argc < 1 || !get_number(args[0], &ms)) return FLOAT_VAL(0.0);
+    return FLOAT_VAL(ms / 3600000.0);
 }
 
 /* ── Memory API ────────────────────────────────────── */
@@ -188,25 +187,28 @@ static Value native_getVmPeakMemory(VM* vm, int argc, Value* args) {
     return INT_VAL((int64_t)tantrums_peak_bytes_allocated);
 }
 
-/* bytesToKB(bytes) -> float */
+/* bytesToKB(bytes) -> float — accepts int or float */
 static Value native_bytesToKB(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
-    return FLOAT_VAL((double)AS_INT(args[0]) / 1024.0);
+    double b;
+    if (argc < 1 || !get_number(args[0], &b)) return FLOAT_VAL(0.0);
+    return FLOAT_VAL(b / 1024.0);
 }
 
-/* bytesToMB(bytes) -> float */
+/* bytesToMB(bytes) -> float — accepts int or float */
 static Value native_bytesToMB(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
-    return FLOAT_VAL((double)AS_INT(args[0]) / (1024.0 * 1024.0));
+    double b;
+    if (argc < 1 || !get_number(args[0], &b)) return FLOAT_VAL(0.0);
+    return FLOAT_VAL(b / (1024.0 * 1024.0));
 }
 
-/* bytesToGB(bytes) -> float */
+/* bytesToGB(bytes) -> float — accepts int or float */
 static Value native_bytesToGB(VM* vm, int argc, Value* args) {
     (void)vm;
-    if (argc < 1 || !IS_INT(args[0])) return FLOAT_VAL(0.0);
-    return FLOAT_VAL((double)AS_INT(args[0]) / (1024.0 * 1024.0 * 1024.0));
+    double b;
+    if (argc < 1 || !get_number(args[0], &b)) return FLOAT_VAL(0.0);
+    return FLOAT_VAL(b / (1024.0 * 1024.0 * 1024.0));
 }
 
 static void define_native(VM* vm, const char* name, NativeFn fn);
@@ -218,14 +220,14 @@ void builtins_register(VM* vm) {
     define_native(vm, "range",  native_range);
     define_native(vm, "type",   native_type);
     define_native(vm, "append", native_append);
-    
+
     // Time API
-    define_native(vm, "getCurrentTime", native_getCurrentTime);
-    define_native(vm, "toSeconds",      native_toSeconds);
-    define_native(vm, "toMilliseconds", native_toMilliseconds);
-    define_native(vm, "toMinutes",      native_toMinutes);
-    define_native(vm, "toHours",        native_toHours);
-    
+    define_native(vm, "getCurrentTime",   native_getCurrentTime);
+    define_native(vm, "toSeconds",        native_toSeconds);
+    define_native(vm, "toMilliseconds",   native_toMilliseconds);
+    define_native(vm, "toMinutes",        native_toMinutes);
+    define_native(vm, "toHours",          native_toHours);
+
     // Memory API
     define_native(vm, "getProcessMemory", native_getProcessMemory);
     define_native(vm, "getVmMemory",      native_getVmMemory);
