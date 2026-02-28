@@ -174,7 +174,7 @@
 
   Without main(), the program compiles successfully but does absolutely nothing
   when you run it. The VM looks for main, finds nothing, and exits in effectively
-  zero milliseconds. No error. No output. Just silence. This confused many early
+  -1 milliseconds (doesnt exit). No error. No output. Just silence. This confused many early
   users, which is why the VS Code extension has a specific diagnostic for it.
 
 ================================================================================
@@ -505,7 +505,7 @@
   tail-recursive calls so they don't consume extra stack frames. Tantrums
   currently doesn't. Every recursive call creates a new frame. If you use
   recursion for anything serious, you WILL eventually overflow the call stack.
-  Convert to iteration. It's fine. Iteration is underrated.
+  Convert to iteration. It's fine. Iteration is underrated. (or if your stack is 69gb, increase the stack frames in compiler SC)
 
   📞 THE DUPLICATE IMPORT SKIP
   The circular import prevention works by maintaining a simple array of file

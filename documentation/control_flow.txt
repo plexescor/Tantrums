@@ -1,676 +1,492 @@
 ================================================================================
-                       MEMORY & ERRORS IN TANTRUMS
+                          CONTROL FLOW IN TANTRUMS
 ================================================================================
 
-  Memory management is the part of programming that separates the people who
-  write code from the people who really understand what's happening. In C, one
-  wrong pointer and your program silently corrupts memory somewhere completely
-  unrelated to the bug, which then crashes 30 seconds later in a completely
-  different function, and you spend 8 hours with a debugger figuring out what
-  happened.
+  A program that only runs top-to-bottom isn't very useful. You need branches.
+  You need loops. You need the ability to make decisions and repeat things.
+  That's what control flow is — the art of making your code go somewhere
+  other than straight down.
 
-  Tantrums takes a different approach. Memory bugs should be caught immediately,
-  with clear error messages, at the exact location they occur. If you free
-  something twice, you should know. If you dereference a freed pointer, you
-  should know. If you forget to free something, you should know.
-
-  And crucially, you should be able to choose how much of this the language does
-  for you automatically, and how much you want to control yourself.
+  Tantrums has all the standard tools plus a few quirks that are either
+  genuinely clever or moderately chaotic depending on how you look at them.
 
   This document covers:
-  • The three memory directives and what they unlock
-  • The seven-layer memory safety stack
-  • Escape analysis in detail — how the compiler decides what to auto-free
-  • Pointer usage — what works and what doesn't
-  • The exit leak detector
-  • Error handling with throw and try/catch
-  • Real things that went catastrophically wrong during development
+  • if / else if / else — branching
+  • while loops — condition-based repetition
+  • for-in loops — iterating over ranges, lists, and strings
+  • break and continue — loop control
+  • All operators — arithmetic, comparison, logical
+  • The reversed operator aliases (=> and =<) and why they exist
+  • Short-circuit evaluation and how it saves CPU cycles
+  • The strict boolean requirement and what it means for you
 
 ================================================================================
-  BASIC INFO: THE THREE MEMORY DIRECTIVES
+  BASIC INFO: BRANCHING WITH IF / ELSE
 ================================================================================
 
-  Tantrums has three file-level directives that control memory behavior.
-  They must appear at the top of the file before any code, in this order:
+  The if statement evaluates a condition and executes a block if it's true.
 
-  #mode (if used) → #autoFree → #allowMemoryLeaks
-
-  ── DIRECTIVE 1: #autoFree ────────────────────────────────────────────────────
-
-  #autoFree true;     // DEFAULT — automatic memory management enabled
-  #autoFree false;    // full manual control
-
-  With #autoFree true (or no directive — this is the default), the language
-  manages pointer memory for you using a two-layer system:
-
-  Layer A — Compile time:
-  The compiler analyzes every alloc'd pointer after parsing the full function.
-  If a pointer is provably local (never returned, never passed to functions,
-  never aliased, never put in a container, never used in complex expressions),
-  the compiler inserts a free() instruction in the bytecode automatically at
-  the end of the pointer's scope. It also prints a note:
-
-  [Tantrums] note: auto-freed 'p' at line 3 (provably local)
-
-  You can suppress these notes with --no-autofree-notes if they clutter
-  your output.
-
-  Layer B — Runtime:
-  If the compiler's escape analysis couldn't prove a pointer was safe to
-  auto-free (because it appeared in a conditional branch, for example), the
-  runtime takes over. When any scope exits, the VM checks if any pointers
-  declared in that scope are still live and haven't escaped. If so, it auto-frees
-  them and logs it:
-
-  [Tantrums Runtime] auto-freed 'p' at scope exit (line 7)
-
-  With #autoFree false, BOTH layers are disabled. The compiler doesn't insert
-  any automatic frees. The runtime doesn't check for live pointers at scope exit.
-  You are completely responsible for every alloc and free.
-
-  Important: #autoFree false disables automatic freeing, but does NOT disable
-  safety checks. Use-after-free, double-free, and null dereference detection
-  are ALWAYS active regardless of any directive.
-
-  Also important: The reassignment-without-free error is ALWAYS active:
-  int* p = alloc int(42);
-  p = alloc int(99);    // COMPILE ERROR regardless of #autoFree setting
-
-  This error is never disabled because it is unambiguously always a leak.
-  There is no scenario where reassigning a pointer variable without freeing
-  the previous allocation is intentional or correct.
-
-  ── DIRECTIVE 2: #allowMemoryLeaks ────────────────────────────────────────────
-
-  #allowMemoryLeaks false;    // DEFAULT — leaks abort compilation
-  #allowMemoryLeaks true;     // leaks produce warnings, not errors
-
-  IMPORTANT: #allowMemoryLeaks true requires #autoFree false to be declared first.
-
-  #allowMemoryLeaks true;                     // COMPILE ERROR
-  #autoFree true; #allowMemoryLeaks true;     // COMPILE ERROR
-
-  #autoFree false; #allowMemoryLeaks true;    // VALID
-
-  Why does it require #autoFree false? Because if auto-free is enabled, the
-  system is actively preventing leaks. Saying "allow leaks" while also saying
-  "auto-free everything" is contradictory. You can't simultaneously be cleaning
-  up memory automatically and allowing it to leak.
-
-  With #allowMemoryLeaks true, compile-time leak errors become warnings:
-
-  Instead of:
-  [Line 3] Type Error: Memory leak detected. Pointer 'p' goes out of scope
-  without being freed.
-  Compilation aborted due to type errors.
-
-  You get:
-  [Line 3] Warning: Potential memory leak. Pointer 'p' goes out of scope
-  without being freed. (#allowMemoryLeaks true)
-
-  And compilation continues. The program runs. Pointer p leaks.
-
-  Why would you want this? The arena/region allocation pattern. Some programs
-  allocate many objects, use them, and then let the operating system reclaim
-  all memory when the process exits. Parsers, compilers, CLI tools that process
-  input and exit — these often use this pattern because the OS cleanup on exit
-  is free and instantaneous. The overhead of freeing each individual allocation
-  is actually slower than just letting the process terminate.
-
-  Even with #allowMemoryLeaks true:
-  • The exit leak detector still runs and reports what leaked
-  • Runtime use-after-free detection is still active
-  • Runtime double-free detection is still active
-  • Runtime null dereference detection is still active
-
-  ── THE FOUR MEMORY PERSONALITIES ────────────────────────────────────────────
-
-  Combining these directives gives you four distinct memory philosophies:
-
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │ #autoFree true  (default) + #allowMemoryLeaks false (default)            │
-  │                                                                           │
-  │ "Safe and automatic"                                                      │
-  │ The compiler and runtime manage your pointers. Leaks abort compilation.  │
-  │ Best for: general purpose code, beginners, anything where safety matters  │
-  └──────────────────────────────────────────────────────────────────────────┘
-
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │ #autoFree false + #allowMemoryLeaks false                                 │
-  │                                                                           │
-  │ "C-style manual memory"                                                   │
-  │ You control everything. Leaks still abort compilation.                    │
-  │ The compiler tells you when you forgot to free. You fix it.               │
-  │ Best for: systems programming, performance-critical allocation,            │
-  │           developers who know what they're doing                          │
-  └──────────────────────────────────────────────────────────────────────────┘
-
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │ #autoFree false + #allowMemoryLeaks true                                  │
-  │                                                                           │
-  │ "Arena/region allocation"                                                 │
-  │ Full manual control. Leaks are intentional and allowed.                   │
-  │ Leak report runs on exit so you know exactly what leaked.                 │
-  │ Best for: parsers, compilers, CLI tools, batch processing programs        │
-  └──────────────────────────────────────────────────────────────────────────┘
-
-  ┌──────────────────────────────────────────────────────────────────────────┐
-  │ #autoFree true + #allowMemoryLeaks true                                   │
-  │                                                                           │
-  │ ❌ INVALID — Contradictory. Compile error.                                │
-  └──────────────────────────────────────────────────────────────────────────┘
-
-================================================================================
-  BASIC INFO: WORKING WITH POINTERS
-================================================================================
-
-  Manual memory in Tantrums uses three keywords: alloc, free, and the
-  dereference operator *.
-
-  ── CREATING A POINTER ────────────────────────────────────────────────────────
-
-  int* p = alloc int(42);
-
-  This allocates an integer on the heap with the initial value 42, and stores
-  the pointer to it in p. The type annotation (int*) tells both you and the
-  compiler that p is a pointer to an integer.
-
-  The only way to create a pointer in Tantrums is via the alloc keyword.
-  There is no address-of operator (&x). This is intentional — variables in
-  Tantrums live in VM stack slots that don't have stable heap addresses.
-  If &x existed, it would point to memory that could move or vanish when the
-  function returns.
-
-  ── READING AND WRITING THROUGH A POINTER ─────────────────────────────────────
-
-  print(*p);    // dereference to READ: prints 42
-  *p = 99;      // dereference to WRITE: the value at p's address is now 99
-  print(*p);    // now prints 99
-
-  ── FREEING A POINTER ────────────────────────────────────────────────────────
-
-  free p;
-
-  This releases the memory that p points to and sets p to null. Any future
-  dereference of p after this point will be caught immediately:
-
-  free p;
-  print(*p);    // [Tantrums Runtime Error] Null pointer dereference!
-                // (line number included)
-
-  ── ALIASING ─────────────────────────────────────────────────────────────────
-
-  q = p;
-
-  This makes q point to the same memory location as p. Now both q and p
-  refer to the same value. Modifying through one affects what you read through
-  the other.
-
-  int* p = alloc int(42);
-  q = p;
-  *q = 99;
-  print(*p);    // 99 — the same memory was modified through q
-
-  If you free p, q becomes a dangling reference. The compiler's escape analysis
-  knows about aliasing (q = p counts as an escape condition for p) and will not
-  auto-free p or emit a leak error when this pattern exists.
-
-  ── PASSING POINTERS TO FUNCTIONS ─────────────────────────────────────────────
-
-  tantrum void process(int* ptr)
+  if (x > 10)
   {
-      *ptr = *ptr * 2;    // double the value at the pointer's address
+      print("X is greater than 10.");
   }
+
+  Add an else block for the false case:
+
+  if (x > 10)
+  {
+      print("X is big.");
+  }
+  else
+  {
+      print("X is not big.");
+  }
+
+  Chain multiple conditions with else if:
+
+  if (x > 100)
+  {
+      print("Very big.");
+  }
+  else if (x > 10)
+  {
+      print("Moderately big.");
+  }
+  else if (x > 0)
+  {
+      print("A little big.");
+  }
+  else
+  {
+      print("Not big at all, or negative.");
+  }
+
+  The conditions are evaluated top to bottom. The first one that's true wins
+  and its block executes. The rest are skipped. If none are true, the else
+  block runs (if one exists).
+
+  ── IMPORTANT: THE BOOLEAN REQUIREMENT ───────────────────────────────────────
+
+  The condition inside if() MUST evaluate to a bool type. Not an int. Not a
+  string. Not a list. A boolean.
+
+  This means you cannot write:
+  if (myList)           // ERROR: myList is a list, not a bool
+  if (x)                // ERROR: x is an int, not a bool
+  if ("text")           // ERROR: "text" is a string, not a bool
+
+  You must be explicit:
+  if (len(myList) > 0)  // CORRECT: comparison returns bool
+  if (x != 0)           // CORRECT: comparison returns bool
+  if (is_active)        // CORRECT: is_active is already a bool
+
+  Comparison operators (==, !=, <, >, <=, >=) always return bool.
+  Logical operators (and, or, !) always return bool.
+  Boolean variables are bool.
+  Everything else is not a bool.
+
+  Why is Tantrums strict about this? Because implicit truthy/falsy coercion
+  is the source of countless subtle bugs. In JavaScript, an empty array []
+  is truthy in if statements. In Python, an empty list [] is falsy. These two
+  languages disagree on what "empty" means as a condition, and both conventions
+  are confusing to people coming from the other language.
+
+  Tantrums refuses to have a convention. Write what you mean. Be explicit.
+  The extra few characters are worth it.
+
+================================================================================
+  BASIC INFO: WHILE LOOPS
+================================================================================
+
+  while loops repeat a block as long as a condition is true.
+
+  int count = 5;
+  while (count > 0)
+  {
+      print(count);
+      count--;
+  }
+  // prints: 5, 4, 3, 2, 1
+
+  The condition is checked before each iteration. If it's false on the first
+  check, the body never executes. If you never make the condition false inside
+  the loop, you get an infinite loop.
+
+  while (true)
+  {
+      string input = input("Type 'quit' to exit: ");
+      if (input == "quit") { break; }
+      print("You said: " + input);
+  }
+
+  The above is a valid pattern — loop forever, use break to escape when needed.
+
+  The same boolean requirement applies. The while() condition must be a bool.
+
+================================================================================
+  BASIC INFO: FOR-IN LOOPS — THREE VARIANTS
+================================================================================
+
+  Tantrums has three variants of the for-in loop, each optimized for a
+  different use case. They all use the same syntax but iterate over different things.
+
+  ── VARIANT 1: RANGE-BASED ITERATION ─────────────────────────────────────────
+
+  for i in range(10)
+  {
+      print(i);
+  }
+  // prints 0 through 9
+
+  range() generates a sequence of integers. See functions.txt for the full
+  three-form range signature (range(end), range(start, end), range(start, end, step)).
+
+  The critically important detail: the compiler does NOT actually create a list
+  of 10 integers in memory for range(10). Instead, the compiler generates
+  specialized loop bytecode:
+  • Initialize a counter variable to 0 (or start)
+  • Before each iteration: compare counter to 10 (or end), exit if equal
+  • At end of each iteration: add step to counter, loop back
+
+  This means range(1000000000) does NOT require 1 billion integers in memory.
+  It uses exactly the same amount of memory regardless of the range size —
+  just the counter variable. This is why tight integer loops in Tantrums are
+  so fast (11x faster than Python on the benchmark).
+
+  ── VARIANT 2: LIST ITERATION ────────────────────────────────────────────────
+
+  list fruits = ["apple", "banana", "cherry"];
+  for fruit in fruits
+  {
+      print(fruit);
+  }
+  // prints: apple, banana, cherry
+
+  Or with a literal list:
+  for n in [1, 4, 9, 16, 25]
+  {
+      print(n);
+  }
+
+  The compiler takes a snapshot of the list before the loop begins. If you
+  modify the list during iteration (appending, changing values), the iteration
+  continues over the original snapshot. This prevents the classic "modified
+  collection during iteration" crash that trips up many developers.
 
   tantrum main()
   {
-      int* p = alloc int(21);
-      process(p);
-      print(*p);    // 42
-      free p;
-  }
-
-  Passing a pointer to a function is an escape condition. The compiler will
-  not auto-free p after process(p) and will not emit a leak error.
-
-  ── RETURNING POINTERS FROM FUNCTIONS ────────────────────────────────────────
-
-  tantrum int* makeValue(int n)
-  {
-      int* p = alloc int(n);
-      return (p);
-  }
-
-  tantrum main()
-  {
-      int* v = makeValue(42);
-      print(*v);    // 42
-      free v;       // caller is responsible for freeing
-  }
-
-  The function's return type must be declared as int* for this to work.
-  Returning a pointer is the ultimate escape condition — the compiler will never
-  auto-free or leak-error any pointer that appears in a return statement.
-
-  ── WHAT YOU CANNOT DO WITH POINTERS ─────────────────────────────────────────
-
-  int* p = &x;         // ❌ address-of doesn't exist
-  p = p + 1;           // ❌ pointer arithmetic doesn't exist
-  int* q = (int*)p;    // ❌ type casting doesn't exist
-  p++;                 // ❌ pointer increment doesn't exist
-
-  These restrictions are intentional. Pointer arithmetic is the primary source
-  of memory corruption bugs in C programs. By not allowing it, Tantrums
-  eliminates an entire class of bugs that are notoriously hard to debug.
-
-================================================================================
-  ADVANCED INFO: ESCAPE ANALYSIS IN DEPTH
-================================================================================
-
-  When #autoFree true is active, the compiler runs escape analysis on every
-  alloc'd pointer in every function. Escape analysis answers one question:
-  "Does this pointer escape this function's scope, or does it stay local?"
-
-  If it escapes — some other piece of code takes ownership of it. The compiler
-  must not free it or emit a leak error. Trust the developer.
-  If it stays local — the compiler is safe to auto-free it at end of scope.
-
-  ── THE ESCAPE CONDITIONS ────────────────────────────────────────────────────
-
-  The compiler considers a pointer escaped if ANY of these are true:
-
-  1. Pointer appears in a return statement anywhere in the function
-     return (p);                → escaped. caller owns it. no auto-free.
-
-  2. Pointer passed as argument to any function call
-     process(p);               → escaped. callee might store it. no auto-free.
-     print(*p);                → NOT escaped. passing *p (the value), not p.
-
-  3. Pointer passed to append()
-     append(myList, p);        → escaped. list now holds it. no auto-free.
-
-  4. Pointer assigned to another variable (alias)
-     q = p;                    → escaped. q might outlive this scope. no auto-free.
-
-  5. Pointer stored in a map
-     myMap["key"] = p;         → escaped. map holds it. no auto-free.
-
-  6. Pointer assigned to a global variable
-     globalPtr = p;            → escaped. global outlives this scope. no auto-free.
-
-  7. Pointer appears anywhere inside a conditional branch
-     if (cond) { free p; }     → ambiguous. compiler can't prove what happens.
-                                  no auto-free. runtime handles it.
-
-  8. Pointer used in complex expressions beyond simple *p reads or writes
-     x = *p + someVar;         → complex use. when in doubt, skip. no auto-free.
-
-  9. Pointer appears in any operator expression that could store it
-     result = p;               → might be storage. no auto-free.
-
-  10. Pointer used in more than one distinct way after declaration
-      *p = 10;
-      *p = 20;                 → multiple uses suggest complex lifetime.
-                                  no auto-free.
-
-  ── THE CONSERVATIVE RULE — THE MOST IMPORTANT RULE ─────────────────────────
-
-  WHEN IN DOUBT → DO NOTHING.
-
-  This is the most important rule in all of escape analysis. If the compiler
-  is uncertain whether a pointer escapes, it assumes it does and skips
-  auto-free entirely. The runtime will handle it if needed. The leak detector
-  will report it if it's truly leaked.
-
-  False negative (missed auto-free): acceptable.
-  The runtime catches it. The leak detector reports it. No harm done.
-
-  False positive (auto-free on a pointer that actually escaped): catastrophic.
-  The pointer gets freed while something else still holds a reference to it.
-  Every subsequent access through that reference is use-after-free.
-  This is worse than not freeing at all.
-
-  Wrong auto-free is worse than no auto-free. The compiler always errs on the
-  side of doing less.
-
-  ── THE PRIORITY ORDER ───────────────────────────────────────────────────────
-
-  For each alloc'd pointer, the compiler follows this priority:
-
-  PRIORITY 1 — Escape detected (any of the 10 conditions)
-  Do nothing. Skip all analysis. Trust the developer.
-
-  PRIORITY 2 — Manual free exists
-  Developer called free p; explicitly. Do nothing. It's handled.
-
-  PRIORITY 3 — Provably local (no escape, no manual free, single simple use)
-  Safe to auto-free. Insert free(p) in bytecode at end of scope.
-  Emit note: [Tantrums] note: auto-freed 'p' at line X (provably local)
-
-  PRIORITY 4 — Ambiguous (doesn't clearly fit any other category)
-  Do nothing. Runtime handles it.
-
-================================================================================
-  ADVANCED INFO: THE SEVEN-LAYER MEMORY SAFETY STACK
-================================================================================
-
-  Tantrums has seven distinct layers of memory safety, each catching different
-  classes of bugs.
-
-  ┌────────────────────────────────────────────────────────────────────────────┐
-  │ LAYER 1: Compile-time escape analysis                                      │
-  │ Runs after full parsing. Identifies pointers that genuinely escape.        │
-  │ Prevents false positive leak errors on valid code.                         │
-  │ Zero false positives by design — conservative rule guarantees this.        │
-  └────────────────────────────────────────────────────────────────────────────┘
-  ┌────────────────────────────────────────────────────────────────────────────┐
-  │ LAYER 2: Compile-time auto-free                                            │
-  │ Inserts free() opcodes for provably local pointers.                        │
-  │ Eliminates the most common case of accidental leaks automatically.         │
-  │ Emits a note so you know it happened.                                      │
-  └────────────────────────────────────────────────────────────────────────────┘
-  ┌────────────────────────────────────────────────────────────────────────────┐
-  │ LAYER 3: Runtime auto-free                                                 │
-  │ At scope exit, the VM checks for live pointers declared in that scope.     │
-  │ If any are still live and haven't escaped, they're freed automatically.    │
-  │ Catches what compile-time analysis was too conservative to handle.         │
-  └────────────────────────────────────────────────────────────────────────────┘
-  ┌────────────────────────────────────────────────────────────────────────────┐
-  │ LAYER 4: Runtime use-after-free detection                                  │
-  │ When a pointer is freed, it's set to null in the pointer registry.         │
-  │ Any subsequent dereference checks against null first.                      │
-  │ Error: [Tantrums Runtime Error] Null pointer dereference! Line X           │
-  └────────────────────────────────────────────────────────────────────────────┘
-  ┌────────────────────────────────────────────────────────────────────────────┐
-  │ LAYER 5: Runtime double-free detection                                     │
-  │ Freeing a null pointer (already freed) is detected immediately.            │
-  │ Error: [Tantrums Runtime Error] Null pointer dereference! Line X           │
-  └────────────────────────────────────────────────────────────────────────────┘
-  ┌────────────────────────────────────────────────────────────────────────────┐
-  │ LAYER 6: Runtime null dereference detection                                │
-  │ Any dereference of a null pointer is caught before it accesses memory.     │
-  │ Error: [Tantrums Runtime Error] Null pointer dereference! Line X           │
-  └────────────────────────────────────────────────────────────────────────────┘
-  ┌────────────────────────────────────────────────────────────────────────────┐
-  │ LAYER 7: Exit leak detector                                                │
-  │ On program exit, all remaining live pointers are reported as leaks.        │
-  │ Reports include line numbers, function names, types, sizes, totals.        │
-  │ Large leak counts redirect to memleaklog.txt.                              │
-  └────────────────────────────────────────────────────────────────────────────┘
-
-  Layers 4, 5, and 6 are ALWAYS active regardless of any directive.
-  You cannot disable use-after-free, double-free, or null dereference detection.
-  Memory corruption is never intentional and there is no use case for allowing it.
-
-================================================================================
-  ADVANCED INFO: THE EXIT LEAK DETECTOR
-================================================================================
-
-  When your program finishes (main() returns), before the VM shuts down, it
-  runs the leak detector. This scans the live pointer registry for any pointers
-  that were allocated but never freed, never auto-freed, and not categorized
-  as intentionally leaked via #allowMemoryLeaks.
-
-  ── SMALL LEAK REPORTS (≤5 leaks) ────────────────────────────────────────────
-
-  Printed directly to the console:
-
-  [Tantrums Warning] Memory leak detected: 3 allocation(s) not freed
-    alloc at line 4 in main — int (96 bytes)
-    alloc at line 7 in makeValue — int (96 bytes)
-    alloc at line 12 in main — int (96 bytes)
-  Total Leaked Memory: 288 bytes = 0.28 KB
-
-  ── LARGE LEAK REPORTS (>5 leaks) ────────────────────────────────────────────
-
-  A brief notice goes to the console:
-  [Tantrums Warning] Memory leak detected: 1000 allocation(s) not freed.
-  See memleaklog.txt in the same directory as the executing bytecode.
-
-  The full report goes to memleaklog.txt in the same folder as your .42ass file:
-
-  TANTRUMS MEMORY LEAK REPORT
-  ============================
-  Executable: main.42ass
-  Leaks: 1000 allocations
-  ============================
-    alloc at line 8 in main — int (96 bytes) [x1000]
-  ============================
-  SUMMARY
-    Total leaked: 96,000 bytes
-               = 93.75 KB
-               = 0.09 MB
-               = 0.00 GB
-  ============================
-
-  The [x1000] notation is deduplication. If the same line allocated a pointer
-  many times (like inside a loop), they're grouped rather than listing the same
-  line 1000 times. This makes the report readable even when you've leaked
-  millions of allocations (which has been tested — it works up to 20 million).
-
-  ── WITH #allowMemoryLeaks true ──────────────────────────────────────────────
-
-  The leak report still runs but the header includes a note:
-
-  TANTRUMS MEMORY LEAK REPORT
-  ============================
-  Note: #allowMemoryLeaks true — leaks permitted by developer.
-  Executable: main.42ass
-  ...
-
-  This makes it clear the leaks were intentional, not a bug in the language.
-
-================================================================================
-  BASIC INFO: ERROR HANDLING WITH THROW AND TRY/CATCH
-================================================================================
-
-  Runtime errors in Tantrums use string-based exceptions. Instead of Java-style
-  Exception objects with stack traces and inheritance hierarchies, Tantrums
-  throws raw strings. It's simple, it's readable, and it works.
-
-  ── THROWING AN ERROR ────────────────────────────────────────────────────────
-
-  throw "Something went catastrophically wrong!";
-
-  When throw executes, the VM immediately halts execution of the current function
-  and unwinds the call stack looking for a try/catch block. If it finds one,
-  execution jumps to the catch block. If it doesn't find one, the error string
-  is printed to the console and the program exits.
-
-  ── CATCHING AN ERROR ────────────────────────────────────────────────────────
-
-  try
-  {
-      // code that might throw
-      throw "oops";
-  }
-  catch (e)
-  {
-      print("Caught: " + e);    // e is the thrown string
-  }
-
-  ── CATCHING WITHOUT A VARIABLE ──────────────────────────────────────────────
-
-  If you don't need to know what the error was, drop the variable:
-
-  try
-  {
-      throw "doesn't matter";
-  }
-  catch
-  {
-      print("Something went wrong. Moving on.");
-  }
-
-  This is affectionately called the "head in the sand" pattern. Sometimes you
-  just want to attempt something and continue regardless of whether it worked.
-  Tantrums explicitly supports this. No judgment.
-
-  ── NESTED TRY/CATCH AND RETHROW ─────────────────────────────────────────────
-
-  try
-  {
-      try
+      list nums = [1, 2, 3];
+      for n in nums
       {
-          throw "inner error";
+          append(nums, n * 10);    // safe — modifies the list but not the iterator
+          print(n);                // still prints 1, 2, 3 in order
       }
-      catch (e)
+      print(nums);    // [1, 2, 3, 10, 20, 30] — modifications are there
+  }
+
+  ── VARIANT 3: STRING ITERATION ──────────────────────────────────────────────
+
+  for ch in "Hello"
+  {
+      print(ch);
+  }
+  // prints: H, then e, then l, then l, then o (each on its own line)
+
+  String iteration pulls each character out one at a time. Each ch is a
+  one-character string. You can treat it like any other string — concatenate
+  it, compare it, pass it to functions.
+
+  Counting vowels example:
+  int vowels = 0;
+  string text = "Tantrums is a great language";
+  for ch in text
+  {
+      if (ch == "a" or ch == "e" or ch == "i" or ch == "o" or ch == "u")
       {
-          print("Inner caught: " + e);
-          throw "re-thrown as outer error";    // rethrow
+          vowels++;
       }
   }
-  catch (e)
+  print("Vowels: " + vowels);
+
+================================================================================
+  BASIC INFO: BREAK AND CONTINUE
+================================================================================
+
+  break exits the innermost loop immediately, skipping any remaining iterations.
+
+  for i in range(10)
   {
-      print("Outer caught: " + e);
+      if (i == 5) { break; }
+      print(i);
   }
+  // prints 0, 1, 2, 3, 4 — stops when i hits 5
 
-  Nesting works to arbitrary depth. Rethrowing (throwing inside a catch block)
-  propagates the error to the next outer try/catch.
+  continue skips the rest of the current iteration and jumps to the next one.
 
-  ── PRACTICAL ERROR HANDLING PATTERNS ────────────────────────────────────────
-
-  Validating input:
-  tantrum int parsePositive(int n)
+  for i in range(10)
   {
-      if (n <= 0)
-      {
-          throw "Expected positive integer, got: " + n;
-      }
-      return (n);
+      if (i % 2 == 0) { continue; }  // skip even numbers
+      print(i);
   }
+  // prints 1, 3, 5, 7, 9
 
-  tantrum main()
+  break and continue work in both for-in loops and while loops.
+
+  Both keywords work by manipulating the VM's Instruction Pointer (IP). When
+  the compiler sees a break, it emits an unconditional jump to the first
+  instruction after the loop. When it sees a continue, it emits a jump to
+  the loop's increment/check point. The offsets are calculated during
+  compilation — by the time the VM runs, it's just a jump with a fixed target.
+
+================================================================================
+  ADVANCED INFO: THE FULL OPERATOR CATALOG
+================================================================================
+
+  ── ARITHMETIC OPERATORS ──────────────────────────────────────────────────────
+
+  +    addition, also string concatenation (if either side is a string)
+  -    subtraction
+  *    multiplication
+  /    division (truncates for int/int, produces float if either is float)
+  %    modulo (remainder after division)
+
+  Examples:
+  10 + 3      → 13
+  10 - 3      → 7
+  10 * 3      → 30
+  10 / 3      → 3     (integer division, truncated)
+  10.0 / 3    → 3.333...  (float division because 10.0 is a float)
+  10 % 3      → 1
+
+  "hello" + " world"    → "hello world"
+  "count: " + 42        → "count: 42"    (int auto-converts to string)
+
+  ── COMPARISON OPERATORS ─────────────────────────────────────────────────────
+
+  ==    equal to
+  !=    not equal to
+  <     less than
+  >     greater than
+  <=    less than or equal to
+  >=    greater than or equal to
+  =<    alias for <=   (reversed — valid in Tantrums)
+  =>    alias for >=   (reversed — valid in Tantrums)
+
+  All comparison operators return bool.
+
+  5 == 5     → true
+  5 != 3     → true
+  5 < 3      → false
+  5 > 3      → true
+  5 <= 5     → true
+  5 >= 6     → false
+  5 =< 5     → true   (same as 5 <= 5)
+  5 => 3     → true   (same as 5 >= 3)
+
+  ── LOGICAL OPERATORS ────────────────────────────────────────────────────────
+
+  &&     logical AND (both sides must be true)
+  and    alias for &&
+  ||     logical OR (at least one side must be true)
+  or     alias for ||
+  !      logical NOT (inverts a bool)
+
+  true && true    → true
+  true && false   → false
+  true || false   → true
+  false || false  → false
+  !true           → false
+  !false          → true
+
+  The `and` and `or` keywords are provided because they're more readable in
+  complex conditions. Both forms work identically.
+
+  if (x > 0 and x < 100) { }    // same as if (x > 0 && x < 100)
+  if (done or failed) { }        // same as if (done || failed)
+
+  ── COMPOUND ASSIGNMENT OPERATORS ────────────────────────────────────────────
+
+  +=    add and assign:      i += 5  is i = i + 5
+  -=    subtract and assign: i -= 3  is i = i - 3
+  *=    multiply and assign: i *= 2  is i = i * 2
+  /=    divide and assign:   i /= 4  is i = i / 4
+  %=    modulo and assign:   i %= 3  is i = i % 3
+
+  These are pure syntactic sugar. The compiler generates the exact same AST
+  for i += 5 as it does for i = i + 5. There's no performance difference.
+  They just save you from typing the variable name twice.
+
+  ── INCREMENT AND DECREMENT ───────────────────────────────────────────────────
+
+  i++    post-increment: returns i, then increments i
+  ++i    pre-increment: increments i, then returns i
+  i--    post-decrement: returns i, then decrements i
+  --i    pre-decrement: decrements i, then returns i
+
+  In standalone statements, all four do the same thing. The difference matters
+  in expressions:
+
+  int i = 5;
+  print(i++);    // prints 5, then i becomes 6
+  print(++i);    // i becomes 7, then prints 7
+
+================================================================================
+  ADVANCED INFO: THE REVERSED OPERATORS — => AND =<
+================================================================================
+
+  This is one of Tantrums' most unusual features, and also one of the most
+  loved once people understand it.
+
+  Standard comparison operators:  >=   <=
+  Reversed aliases in Tantrums:   =>   =<
+
+  They are identical in behavior. `x >= 5` and `x => 5` produce the same
+  bytecode and the same result.
+
+  Why do these exist? Because developers make typos. When you're typing fast,
+  it's completely natural to type => instead of >= — especially if you're
+  coming from a language where => means something (JavaScript, Haskell, etc.).
+
+  In most languages:
+  • JavaScript: => creates an arrow function. a => 5 is a function, not a comparison.
+  • C++: => is a syntax error. The compiler screams.
+  • Tantrums: => is just >=. Keeps working. You'll never know you made a typo.
+
+  Same for =<. In most languages, =< is a syntax error. In Tantrums, it's <=.
+
+  We call these the "fat-finger operators." They exist because the Tantrums
+  lexer was explicitly built to handle the most common directional mistakes
+  when typing comparison operators at speed. It's not a design compromise —
+  it's a deliberate ergonomic feature.
+
+  if (x => 0 and x =< 100)    // valid Tantrums, same as x >= 0 && x <= 100
   {
-      try
-      {
-          int x = parsePositive(-5);
-          print(x);
-      }
-      catch (e)
-      {
-          print("Error: " + e);
-      }
+      print("x is in range");
   }
 
 ================================================================================
-  LAUGHS & FACTS: MEMORY DISASTERS AND LESSONS LEARNED
+  ADVANCED INFO: SHORT-CIRCUIT EVALUATION
 ================================================================================
 
-  ☠️ THE 32GB RAM INCIDENT
-  During development, a test script created a self-referencing map — a map that
-  contained a reference to itself. Inside a while(true) loop. The reference
-  counting GC (which was the memory system at the time) never saw the reference
-  count hit zero because the map always held a reference to itself.
+  Tantrums implements short-circuit evaluation for && (and) and || (or).
+  This is an optimization that skips evaluating the right side of a logical
+  operator when the result is already determined by the left side.
 
-  Every iteration created a new self-referencing map that could never be freed.
-  The script consumed all 16GB of physical RAM, then the OS started paging to
-  disk, eventually consuming the entire 16GB page file as well. Total: 32GB.
-  The machine required a hard reboot.
+  For &&: if the left side is false, the whole expression is false regardless
+  of the right side. So the right side is never evaluated.
 
-  The reference cycle collector was implemented immediately afterward.
+  if (false && expensiveFunction())
+  {
+      // never reached
+  }
+  // expensiveFunction() is NEVER CALLED — the VM sees `false &&` and jumps
+  // past the entire expression immediately
 
-  ☠️ THE ORIGINAL "GC" THAT WAS NOTHING
-  The first version of the garbage collector was a function with this body:
-  void collectGarbage() {
-      // TODO: implement
+  For ||: if the left side is true, the whole expression is true regardless
+  of the right side. So the right side is never evaluated.
+
+  if (true || expensiveFunction())
+  {
+      // always reached
+  }
+  // expensiveFunction() is NEVER CALLED
+
+  This matters beyond performance. It's how you safely check things that could
+  crash if evaluated unconditionally:
+
+  // Check if list is non-empty before accessing first element
+  if (len(items) > 0 and items[0] == "target")
+  {
+      print("found");
   }
 
-  Memory leaks were categorized as "deferred cleanup" in the internal docs.
-  This lasted two test runs before scripts started consuming all available RAM.
-  In hindsight, the name was accurate: it did collect garbage, just very slowly,
-  by waiting for the OS to reclaim everything when the process was killed.
+  If items is empty, len(items) > 0 is false, and items[0] is never evaluated.
+  No out-of-bounds access. Short-circuit evaluation makes this pattern safe.
 
-  ☠️ WHY STRINGS ARE NOT EXCEPTIONS
-  Java throws Exception objects. Python throws Exception instances with stack
-  traces and inheritance hierarchies. Why does Tantrums throw strings?
-
-  Because implementing proper Exception objects in the bytecode VM requires
-  the VM to be able to construct, store, and pass these objects through the
-  exception unwind mechanism. Each Exception would need to be a heap-allocated
-  object, reference-counted, with fields for the message, the line number, the
-  call stack at throw time, etc.
-
-  Building and serializing this through the existing VM was significantly more
-  complex than just... throwing a string. And honestly, for most error handling
-  purposes, knowing what the error message says is all you need. We're not
-  doing Java-style exception hierarchies with 17 subclasses of IOException.
-  We're throwing a descriptive string and catching it. It works.
-
-  ☠️ THE CATCH IS LITERALLY A GOTO
-  The try/catch mechanism in the VM works by maintaining a stack of TryCatchRecord
-  structs. Each struct contains the bytecode offset of the corresponding catch
-  block. When throw executes, the VM pops the call stack looking for the nearest
-  TryCatchRecord. When it finds one, it sets the Instruction Pointer (IP) to the
-  catch block offset from the record.
-
-  That IP assignment is literally equivalent to a goto statement in the C source
-  code of the VM. try/catch is a well-structured, semantically meaningful goto.
-  Every exception mechanism in every language is, at some level, a goto. We
-  just didn't bother hiding it behind a more sophisticated mechanism.
-
-  ☠️ THE DOUBLE FREE THAT DIDN'T CRASH
-  In C, a double free (calling free() on the same pointer twice) is undefined
-  behavior. It can corrupt the heap allocator's internal metadata, causing
-  subsequent allocations to return overlapping memory regions, resulting in
-  memory corruption that manifests as completely unrelated crashes hours later.
-  It's one of the most dangerous bug classes in C programming.
-
-  In Tantrums, when you call free p, the pointer p is set to null in the
-  pointer registry immediately. The next time you call free p again, the runtime
-  checks: is p null? Yes. Emits a "Null pointer dereference" error. Program
-  halts cleanly. No heap corruption. No mysterious crashes 30 minutes later.
-  Just a clear error message at the exact line where it happened.
-
-  ☠️ THE DIVISION BY ZERO DUALITY
-  If you write `x / 0` as a literal in your source code, the semantic analyzer
-  catches it at compile time and refuses to compile:
-  [Line X] Error: Division by zero.
-
-  But if you write `y = 0; x / y`, the zero isn't known until runtime. The VM
-  intercepts the division, detects the zero divisor before performing the
-  operation, and throws a clean Tantrums error. Without this, the OS would
-  deliver a SIGFPE signal to the process (Floating Point Exception) and the
-  VM would crash with "Floating point exception (core dumped)" — a particularly
-  unhelpful error message that tells you nothing about your Tantrums code.
-
-  ☠️ THE 20 MILLION ALLOCATION STRESS TEST
-  The leak detector was stress-tested with a loop that allocated 20 million
-  pointers without freeing any of them. The results:
-  • Process memory used: 2.80 GB
-  • Leak detector reported: 1.67 GB of leaks
-  • The ratio is consistent across scales (1.67x overhead is expected —
-    it includes malloc block headers, VM tracking structures, etc.)
-  • The deduplication [x20000000] worked correctly
-  • The redirect to memleaklog.txt worked correctly
-  • The VM did not crash, hang, or produce incorrect numbers
-  • The entire execution was stable
-
-  A leak detector that works correctly at 20 million leaks is a leak detector
-  you can actually trust at 20 actual leaks.
+  The VM implements this by emitting OP_JUMP_IF_FALSE and OP_JUMP_IF_TRUE
+  opcodes at the point where the short-circuit can occur. If the early-exit
+  condition is met, the IP jumps past the rest of the expression.
 
 ================================================================================
-  QUICK REFERENCE: MEMORY BEHAVIORS BY DIRECTIVE COMBINATION
+  ADVANCED INFO: HOW JUMP OFFSETS WORK
 ================================================================================
 
-  ┌──────────────────────────────┬───────────────┬───────────────┬────────────┐
-  │ Behavior                     │ autoFree true │ autoFree false│ autoFree   │
-  │                              │ leaks false   │ leaks false   │ false      │
-  │                              │ (DEFAULT)     │               │ leaks true │
-  ├──────────────────────────────┼───────────────┼───────────────┼──────────── ┤
-  │ Compile-time auto-free       │ ✅ enabled    │ ❌ disabled   │ ❌ disabled│
-  │ Runtime auto-free            │ ✅ enabled    │ ❌ disabled   │ ❌ disabled│
-  │ Compile error on scope exit  │ ✅ enabled    │ ✅ enabled    │ ⚠️ warning │
-  │ Compile error on reassign    │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
-  │ Compile error on early return│ ✅ enabled    │ ✅ enabled    │ ⚠️ warning │
-  │ Exit leak detector           │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
-  │ Use-after-free detection     │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
-  │ Double-free detection        │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
-  │ Null dereference detection   │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
-  └──────────────────────────────┴───────────────┴───────────────┴────────────┘
+  Every if statement, while loop, and for loop involves jumps — the VM's
+  Instruction Pointer moving to a different location in the bytecode.
+
+  The compiler handles this in two phases:
+
+  Phase 1 (when it first sees the if/loop): The compiler emits a jump opcode
+  with a placeholder offset (usually 0). It records the position of this
+  placeholder.
+
+  Phase 2 (when it reaches the end of the block): The compiler now knows
+  how many bytes of bytecode the block contained. It goes back and patches
+  the placeholder with the real offset.
+
+  This is called "backpatching" and it's standard practice in bytecode compilers.
+
+  The operand for jump opcodes is a signed integer. The maximum jump offset
+  is bounded by this integer's range. If you write an if statement with an
+  astronomically large block (tens of thousands of lines of code inside a single
+  branch), you could theoretically exceed the maximum representable jump offset.
+  In practice, no real program does this. But theoretically, if you tried to
+  put 65,535+ bytes of bytecode inside a single branch, the compiler would fail.
+  This has never happened in practice.
 
 ================================================================================
-  END OF MEMORY & ERRORS.
-  MAY YOUR POINTERS ALWAYS BE VALID, YOUR FREES ALWAYS BE SINGLE,
-  AND YOUR LEAKS ALWAYS BE INTENTIONAL.
-================================================================================ 
+  LAUGHS & FACTS: THE CONTROL FLOW EDITION
+================================================================================
+
+  🔀 THE SWITCH STATEMENT THAT NEVER WAS
+  There are no switch statements in Tantrums. The reason is embarrassingly
+  honest: implementing switch in a bytecode compiler requires building a jump
+  table — a data structure that maps each case value to the bytecode offset of
+  that case's block. Computing jump tables in C++ requires careful bookkeeping
+  of offsets that aren't known until the entire switch block is parsed.
+
+  The developers looked at the complexity, looked at the deadline, and decided
+  that long chains of else if are perfectly fine. They are, technically. They
+  compile to sequential comparisons rather than a jump table, which is slightly
+  slower for large switches, but for the sizes most switch statements actually
+  are, the difference is negligible.
+
+  switch statements are on the roadmap. Probably.
+
+  🔀 THE RANGE OPTIMIZATION THAT SURPRISED EVERYONE
+  When the decision was made that range(N) in for loops would generate
+  specialized loop bytecode rather than allocating a list, nobody was sure how
+  much it would help. The answer, on the 100 million iteration benchmark, was:
+  a lot. The loop runs in 4.26 seconds. Python takes 46.86 seconds for the
+  same loop. That 11x speedup comes almost entirely from not allocating a
+  100 million element list just to iterate it.
+
+  Python actually uses the same optimization internally with its range object.
+  We just made the same decision independently and were pleased to discover
+  we'd arrived at the same conclusion as the Python developers.
+
+  🔀 THE LIST ITERATOR SNAPSHOT
+  The decision to snapshot the list before iterating was made after a bug where
+  modifying a list during iteration caused the iterator to skip elements or
+  revisit them depending on where the modification happened. Rather than
+  implementing complex "concurrent modification" detection, the solution was
+  to just take a snapshot at the start. Simple. Predictable. Correct.
+
+  🔀 THE FAT-FINGER ORIGIN STORY
+  The reversed operators (=> and =<) were added after a user spent 20 minutes
+  debugging code that looked perfectly correct but kept getting syntax errors.
+  The problem was that they'd typed => everywhere instead of >=. The fix was
+  to just make => valid. Instead of making the user change their habits,
+  the language adapted to the user. This is the correct philosophy.
+
+  🔀 THE COMPOUND ASSIGNMENT REVELATION
+  When += and -= were implemented, the developers discovered that the cleanest
+  way to handle them was to have the parser transform `i += 5` into the AST for
+  `i = i + 5` at parse time. The code generator then never needed to know about
+  compound assignment at all. The transformation is invisible by the time
+  bytecode is generated. Two lines of parser code, zero lines of VM code.
+
+================================================================================
+  END OF CONTROL FLOW. BRANCH WISELY. LOOP EFFICIENTLY.
+  MAY ALL YOUR CONDITIONS EVALUATE TO BOOL.
+================================================================================

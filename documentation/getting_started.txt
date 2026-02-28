@@ -61,7 +61,7 @@
   ────────────────────────────
   Any of these will work:
   • MSVC (Visual Studio 2022 or later) — Windows
-  • GCC 13+ — Linux / Mac
+  • GCC 13+ — Linux / Mac / Windows
   • Clang 16+ — Any platform
 
   The project uses C++23 features, so older compilers will fail to build it.
@@ -267,7 +267,7 @@
   `parseExpression()`, which might call `parsePrimary()`, and so on.
 
   This is where syntax errors are caught. If you forget a closing brace or
-  mistype a keyword, the parser detects it and reports the exact line number.
+  mistype a keyword, the parser detects it and reports the exact(mostly) line number.
 
   ── STAGE 3: SEMANTIC ANALYSIS ────────────────────────────────────────────────
 
@@ -393,7 +393,8 @@
   consumed all 16GB of physical RAM plus 16GB of page file before requiring
   a hard system reboot. The reference cycle collector was implemented
   approximately immediately after. No data was lost. The test machine was fine.
-  The developer's blood pressure was less fine.
+  The developer's blood pressure was less fine, Anthropic's server thanked us for 
+  not stressing them for the period the test machine was off.
 
   💥 THE PORTABLE BYTECODE COINCIDENCE
   The bytecode being cross-platform was partly intentional and partly a happy

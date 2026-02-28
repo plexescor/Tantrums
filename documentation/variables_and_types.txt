@@ -311,10 +311,10 @@
 
   In Tantrums, variables you declare without assigning get safe defaults:
 
-  int x;         → null (prints as null, won't cause a crash)
-  float f;       → null
-  string s;      → null
-  bool b;        → null
+  int x;         → 0 (prints as 0, won't cause a crash)
+  float f;       → 0
+  string s;      → ""
+  bool b;        → false
   list items;    → []     (empty list, not null)
   map data;      → {}     (empty map, not null)
 
