@@ -10,6 +10,7 @@
 #include <cstdlib>
 
 VM* current_vm_for_gc = nullptr;
+bool global_allow_leaks = false;
 
 void vm_init(VM* vm) {
     vm->stack_top = vm->stack;
@@ -17,11 +18,106 @@ void vm_init(VM* vm) {
     vm->handler_count = 0;
     vm->objects = nullptr;
     vm->scope_depth = 0;
+    vm->auto_free_records = nullptr;
+    vm->auto_free_capacity = 0;
+    vm->auto_free_count = 0;
+    vm->total_auto_frees = 0;
     table_init(&vm->globals);
     builtins_register(vm);
 }
 
 void vm_free(VM* vm) {
+    if (vm->total_auto_frees > 0) {
+        FILE* out_file = stdout;
+        bool write_to_file = vm->total_auto_frees > 20;
+
+        if (write_to_file) {
+            extern const char* current_bytecode_path;
+            char log_path[1024] = "autoFree.txt";
+            if (current_bytecode_path) {
+                const char* last_slash = strrchr(current_bytecode_path, '/');
+                const char* last_bslash = strrchr(current_bytecode_path, '\\');
+                const char* dir_end = last_slash > last_bslash ? last_slash : last_bslash;
+                if (dir_end) {
+                    size_t dir_len = dir_end - current_bytecode_path + 1;
+                    if (dir_len < sizeof(log_path)) {
+                        strncpy(log_path, current_bytecode_path, dir_len);
+                        log_path[dir_len] = '\0';
+                        strncat(log_path, "autoFree.txt", sizeof(log_path) - dir_len - 1);
+                    }
+                }
+            }
+            out_file = fopen(log_path, "w");
+            if (!out_file) {
+                out_file = stdout; // fallback
+                printf("Failed to open autoFree.txt for writing.\n");
+            }
+        }
+
+        const char* exec_name = "unknown";
+        extern const char* current_bytecode_path;
+        if (current_bytecode_path) {
+            const char* last_slash = strrchr(current_bytecode_path, '/');
+            const char* last_bslash = strrchr(current_bytecode_path, '\\');
+            const char* start = last_slash > last_bslash ? last_slash : last_bslash;
+            exec_name = start ? start + 1 : current_bytecode_path;
+        }
+
+        fprintf(out_file, "\nTANTRUMS AUTO-FREE REPORT\n");
+        fprintf(out_file, "============================\n");
+        fprintf(out_file, "Executable: %s\n", exec_name);
+        fprintf(out_file, "Auto-Frees: %d allocations\n", vm->total_auto_frees);
+        fprintf(out_file, "============================\n");
+
+        size_t total_bytes = 0;
+        for (int i = 0; i < vm->auto_free_count; i++) {
+            AutoFreeRecord* rec = &vm->auto_free_records[i];
+            total_bytes += rec->size * rec->count;
+            if (rec->count > 1) {
+                fprintf(out_file, "  alloc at line %d in %s — %s (%zu bytes) [x%d]\n",
+                        rec->line, rec->func_name, rec->type_name, rec->size, rec->count);
+            } else {
+                fprintf(out_file, "  alloc at line %d in %s — %s (%zu bytes)\n",
+                        rec->line, rec->func_name, rec->type_name, rec->size);
+            }
+        }
+        
+        char formatted_bytes[64];
+        snprintf(formatted_bytes, sizeof(formatted_bytes), "%zu", total_bytes);
+        int len = (int)strlen(formatted_bytes);
+        char comma_bytes[64];
+        int out_idx = 0;
+        for (int i = 0; i < len; i++) {
+            if (i > 0 && (len - i) % 3 == 0) {
+                if (out_idx < sizeof(comma_bytes) - 1) comma_bytes[out_idx++] = ',';
+            }
+            if (out_idx < sizeof(comma_bytes) - 1) comma_bytes[out_idx++] = formatted_bytes[i];
+        }
+        comma_bytes[out_idx] = '\0';
+
+        fprintf(out_file, "============================\n");
+        fprintf(out_file, "SUMMARY\n");
+        fprintf(out_file, "  Total auto-freed: %s bytes\n", comma_bytes);
+        if (total_bytes >= 1024) {
+            fprintf(out_file, "                  = %.2f KB\n", (double)total_bytes / 1024.0);
+        }
+        if (total_bytes >= 1024 * 1024) {
+             fprintf(out_file, "                  = %.2f MB\n", (double)total_bytes / (1024.0 * 1024.0));
+        }
+        fprintf(out_file, "============================\n");
+        
+        if (out_file != stdout) {
+            fclose(out_file);
+        } else {
+            fprintf(stdout, "\n");
+        }
+    }
+    
+    if (vm->auto_free_records) {
+        free(vm->auto_free_records);
+        vm->auto_free_records = nullptr;
+    }
+
     if (current_vm_for_gc == vm) current_vm_for_gc = nullptr;
     table_free(&vm->globals);
     tantrums_free_all_objects();
@@ -444,10 +540,36 @@ static InterpretResult run(VM* vm) {
                 while (o) {
                     if (o->type == OBJ_POINTER) {
                         ObjPointer* p = (ObjPointer*)o;
-                        if (p->is_valid && p->target && !p->escaped && p->scope_depth > vm->scope_depth) {
+                        if (p->auto_manage && p->is_valid && p->target && !p->escaped && p->scope_depth > vm->scope_depth) {
                             extern bool suppress_autofree_notes;
                             if (!suppress_autofree_notes) {
-                                printf("[Tantrums] note: runtime auto-freed pointer at line %d (Layer 2)\n", p->alloc_line);
+                                const char* func_name = p->alloc_func ? p->alloc_func->chars : "main";
+                                const char* type_name = p->alloc_type ? p->alloc_type->chars : "dynamic";
+                                int line = p->alloc_line;
+                                size_t size = p->alloc_size;
+                                
+                                bool found = false;
+                                for (int i = 0; i < vm->auto_free_count; i++) {
+                                    AutoFreeRecord* rec = &vm->auto_free_records[i];
+                                    if (rec->line == line && rec->size == size && strcmp(rec->func_name, func_name) == 0 && strcmp(rec->type_name, type_name) == 0) {
+                                        rec->count++;
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                if (!found) {
+                                    if (vm->auto_free_count >= vm->auto_free_capacity) {
+                                        vm->auto_free_capacity = vm->auto_free_capacity < 8 ? 8 : vm->auto_free_capacity * 2;
+                                        vm->auto_free_records = (AutoFreeRecord*)realloc(vm->auto_free_records, sizeof(AutoFreeRecord) * vm->auto_free_capacity);
+                                    }
+                                    AutoFreeRecord* new_rec = &vm->auto_free_records[vm->auto_free_count++];
+                                    new_rec->func_name = func_name;
+                                    new_rec->type_name = type_name;
+                                    new_rec->line = line;
+                                    new_rec->size = size;
+                                    new_rec->count = 1;
+                                }
+                                vm->total_auto_frees++;
                             }
                             free(p->target);
                             p->target = nullptr;
@@ -470,8 +592,9 @@ static InterpretResult run(VM* vm) {
             
             ObjString* type_str = AS_STRING(READ_CONSTANT());
             ptr->alloc_type = type_str;
+            ptr->auto_manage = (READ_BYTE() == 1);
             ptr->alloc_func = frame->function->name;
-            int offset = (int)(frame->ip - frame->function->chunk->code - 2);
+            int offset = (int)(frame->ip - frame->function->chunk->code - 3); // -3 because constant offset and auto_manage byte
             ptr->alloc_line = frame->function->chunk->lines[offset];
             ptr->scope_depth = vm->scope_depth;
             ptr->escaped = false;

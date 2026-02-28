@@ -2,7 +2,7 @@
                      TANTRUMS LANGUAGE — QUICK REFERENCE
 ================================================================================
 
-Version  : 0.1.0
+Version  : 0.2.0
 Extension: .42AHH  (source)  /  .42ass  (compiled bytecode)
 
 
@@ -14,119 +14,184 @@ HOW TO USE
   tantrums compile <file.42AHH>   Compile to .42ass only (no execution)
   tantrums exec <file.42ass>      Run a pre-compiled .42ass file
 
-The .42ass bytecode is cross-platform — compile on Windows, run on Linux/Mac
+  Flags:
+  --no-autofree-notes             Suppress auto-free compiler notes
+
+The .42ass bytecode is cross-platform — compile on Windows, run on Linux
 (as long as the Tantrums VM binary is compiled for that OS).
 
 
 ================================================================================
-WHAT'S IMPLEMENTED (v1)
+WHAT'S IMPLEMENTED (v0.2.0)
 ================================================================================
 
-  [x] Variables           int x = 5;  or  x = 5;
-  [x] Types               int, float, string, bool, list, map
-  [x] Functions           tantrum keyword, optional return type
+  [x] Variables              int x = 5;  or  x = 5;
+  [x] Types                  int, float, string, bool, list, map
+  [x] Functions              tantrum keyword, optional return type
+  [x] Void functions         tantrum void foo()
+  [x] Pointer return type    tantrum int* foo()
   [x] If / else if / else
   [x] While loop
-  [x] For-in loop         for i in range(N), for i in list, for i in "string"
-  [x] Loop control        break, continue
-  [x] Operators           + - * / % == != < > <= >= => =< && || and or !
-  [x] String escapes       \n \t \\ \" \r \0
-  [x] Auto string concat   "age: " + 25 -> "age: 25"
-  [x] Compound assignment   i += 1, i -= 2, i *= 3, i /= 4, i %= 5
-  [x] Increment/Decrement   i++, ++i, i--, --i
-  [x] Type checking         compile-time type errors for typed params/vars
-  [x] Mode directives       #mode static; / #mode dynamic; / #mode both;
-  [x] Comments            // single line,  /* multi-line */
-  [x] Lists               [1, 2, 3], indexing, append
-  [x] Imports             use helper.42AHH;  (same directory only)
-  [x] Maps                {"key": "value"}
-  [x] Strings             treated as list of characters
-  [x] Built-in functions  print, input, len, range, type, append
-  [x] Manual memory       alloc / free keywords
-  [x] Safe pointers       & and * operators, null-check on deref
-  [x] Throw               throw "error message";
-  [x] Try / Catch          try { ... } catch (e) { ... }
-  [x] Bytecode compiler   .42AHH -> .42ass binary format
-  [x] Cross-platform VM   runs .42ass on any OS
-  [x] Entry point         main() function is called automatically
+  [x] For-in loop            for i in range(N), for i in list, for i in "string"
+  [x] Loop control           break, continue
+  [x] Operators              + - * / % == != < > <= >= => =< && || and or !
+  [x] Compound assignment    i += 1, i -= 2, i *= 3, i /= 4, i %= 5
+  [x] Increment/Decrement    i++, ++i, i--, --i
+  [x] String escapes         \n \t \\ \" \r \0
+  [x] Auto string concat     "age: " + 25 → "age: 25"
+  [x] Type checking          compile-time type errors for typed params/vars
+  [x] Mode directives        #mode static; / #mode dynamic; / #mode both;
+  [x] Static return enforce  #mode static requires return types, void, all paths
+  [x] Memory directives      #autoFree true/false, #allowMemoryLeaks true/false
+  [x] Manual memory          alloc / free keywords
+  [x] Pointer safety         null-check on deref, use-after-free, double-free detection
+  [x] Escape analysis        smart compile-time pointer escape detection
+  [x] Auto-free              compiler + runtime auto-free for provably local pointers
+  [x] Leak detection         exit report with line numbers, types, sizes, memleaklog.txt
+  [x] Comments               // single line,  /* multi-line */
+  [x] Lists                  [1, 2, 3], indexing, append
+  [x] Maps                   {"key": "value"}
+  [x] Strings                treated as list of characters
+  [x] Imports                use helper.42AHH;  (same directory only)
+  [x] Built-in functions     print, input, len, range, type, append
+  [x] Built-in profiling     getCurrentTime, getProcessMemory, bytesToMB, etc.
+  [x] Throw                  throw "error message";
+  [x] Try / Catch            try { ... } catch (e) { ... }, nested rethrow
+  [x] Bytecode compiler      .42AHH → .42ass binary format
+  [x] Cross-platform VM      runs .42ass on any OS
+  [x] Entry point            main() function called automatically
 
 
 ================================================================================
 WHAT'S TBD (future versions)
 ================================================================================
 
-  [ ] Modules             use math;  use fs;
-  [ ] C/C++ FFI           foreign "C" { ... }
-  [ ] Static typing       STRICT; mode
-  [ ] Try / catch          error handling blocks
-  [ ] Graphics            OpenGL / Vulkan via modules
-  [ ] Window creation     GLFW / SDL2 wrapper
+  [ ] Math module            use math;  (sin, cos, sqrt, pow, abs, floor, ceil)
+  [ ] File system module     use fs;    (read, write, append, exists)
+  [ ] C/C++ FFI              foreign "C" { ... }
+  [ ] Graphics               OpenGL / Vulkan via modules
+  [ ] Window creation        Win32 / GLFW / SDL2 wrapper
   [ ] Audio / Networking
-  [ ] Native compilation  .42AHH -> native .exe
+  [ ] Native compilation     .42AHH → native .exe via LLVM
+  [ ] JIT compiler           LLVM backend
+  [ ] Package manager
 
 
 ================================================================================
 SYNTAX REFERENCE
 ================================================================================
 
+────────────────────────────────────────────────────────────────────────────────
+FILE-LEVEL DIRECTIVES
+────────────────────────────────────────────────────────────────────────────────
+
+All directives must appear at the top of the file before any code.
+Order matters: #mode → #autoFree → #allowMemoryLeaks
+
 MODE DIRECTIVES:
-----------------
-  Place at the top of your file to control how the compiler handles types:
+  #mode static;     All variables must have type annotations.
+                    All functions must declare return types.
+                    All code paths must return.
+                    x = 5; → COMPILE ERROR (missing type)
+                    int x = 5; → OK
 
-  #mode static;     // ALL variables must have type annotations
-                    // x = 5;  → COMPILE ERROR
-                    // int x = 5;  → OK
+  #mode dynamic;    No type checking at all.
+                    int x = "hello"; → OK (types ignored)
 
-  #mode dynamic;    // NO type checking at all
-                    // int x = "hello";  → OK (types ignored)
-                    // Any type annotations are accepted but not enforced
+  #mode both;       Mixed mode (DEFAULT if no directive).
+                    Typed variables are checked, untyped are dynamic.
+                    int x = "hello"; → ERROR
+                    x = "hello"; → OK
 
-  #mode both;       // Mixed mode (DEFAULT if no directive)
-                    // Typed variables are checked, untyped are dynamic
-                    // int x = "hello";  → ERROR
-                    // x = "hello";      → OK
+MEMORY DIRECTIVES:
+  #autoFree true;   Default. Compiler + runtime auto-free pointers when safe.
+                    Escape analysis runs on every pointer.
+                    Provably local pointers are freed automatically.
+                    Runtime catches anything the compiler missed.
 
-  If no #mode directive is present, 'both' mode is used (current behavior).
+  #autoFree false;  Full manual control. You free everything.
+                    Compile-time auto-free disabled.
+                    Runtime auto-free disabled.
+                    Leak detector still reports what you forgot.
+                    Runtime safety checks still active.
 
-VARIABLES:
-----------
-  x = 42;                  // dynamic — no type needed
-  int x = 42;              // typed declaration
+  #allowMemoryLeaks true;
+                    Requires #autoFree false declared first.
+                    Compile-time leak errors become warnings instead of aborting.
+                    Program compiles and runs even with leaked pointers.
+                    Exit leak report and runtime safety still active.
+                    Use for arena/region allocation patterns.
+
+  #allowMemoryLeaks false;
+                    Default. Compile-time leak errors abort compilation.
+
+VALID COMBINATIONS:
+  (none)                          → #mode both, #autoFree true, leaks abort
+  #mode static;                   → strict types, auto-free, leaks abort
+  #autoFree false;                → manual memory, leaks abort
+  #autoFree false;
+  #allowMemoryLeaks true;         → manual memory, leaks warn only
+  #autoFree true;
+  #allowMemoryLeaks true;         → INVALID, compile error
+
+────────────────────────────────────────────────────────────────────────────────
+VARIABLES
+────────────────────────────────────────────────────────────────────────────────
+
+  x = 42;                    dynamic — no type needed
+  int x = 42;                typed declaration
   float pi = 3.14;
   string name = "Tantrums";
   bool alive = true;
   list nums = [1, 2, 3];
   map data = {"name": "john", "age": "21"};
 
-  // Unassigned objects default securely
-  list items;              // automatically initializes as empty list []
-  map kv;                  // automatically initializes as empty map {}
-  int y;                   // defaults to null
+  // Defaults for unassigned typed declarations:
+  list items;                → initializes as []
+  map kv;                    → initializes as {}
+  int y;                     → defaults to null
 
+────────────────────────────────────────────────────────────────────────────────
+FUNCTIONS
+────────────────────────────────────────────────────────────────────────────────
 
-FUNCTIONS:
-----------
   // With return type
   tantrum int add(int a, int b)
   {
       return (a + b);
   }
 
-  // Without return type
-  tantrum greet(string name)
+  // Void — no return value
+  tantrum void greet(string name)
   {
       print("Hello " + name);
   }
 
-  // Dynamic (no types at all)
+  // Pointer return type
+  tantrum int* makeValue()
+  {
+      int* p = alloc int(42);
+      return (p);
+  }
+
+  // Dynamic — no types at all
   tantrum multiply(a, b)
   {
       return (a * b);
   }
 
+  // #mode static rules for functions:
+  //   - must declare return type (int, float, string, bool, list, map, void, int*)
+  //   - non-void functions must have return statement
+  //   - all code paths must return a value
+  //   - return type must match declared type
+  //   - void functions cannot return a value
+  //   - void functions cannot be used in expressions
 
-IF / ELSE:
-----------
+────────────────────────────────────────────────────────────────────────────────
+CONTROL FLOW
+────────────────────────────────────────────────────────────────────────────────
+
   if (x > 10)
   {
       print("big");
@@ -140,181 +205,188 @@ IF / ELSE:
       print("small");
   }
 
+  for i in range(10) { print(i); }         // 0 to 9
+  for i in range(2, 10) { print(i); }      // 2 to 9
+  for i in range(0, 50, 5) { print(i); }   // 0, 5, 10 ... 45
+  for ch in "Hello" { print(ch); }         // H e l l o
+  for item in [1, 2, 3] { print(item); }
 
-FOR LOOP:
----------
+  while (count > 0) { count--; }
+
   for i in range(10)
   {
+      if (i == 5) { break; }
+      if (i % 2 == 0) { continue; }
       print(i);
   }
 
-  for ch in "Hello"
-  {
-      print(ch);
-  }
+────────────────────────────────────────────────────────────────────────────────
+OPERATORS
+────────────────────────────────────────────────────────────────────────────────
 
-  for item in [1, 2, 3]
-  {
-      print(item);
-  }
+  Arithmetic:     +  -  *  /  %
+                  "hello " + 42 → "hello 42"  (auto string concat)
 
+  Comparison:     ==  !=  <  >  <=  >=  =>  =<
+                  (=> and =< are reversed aliases for >= and <=)
 
-WHILE LOOP:
------------
-  int count = 5;
-  while (count > 0)
-  {
-      print(count);
-      count = count - 1;
-  }
+  Logical:        &&  and    ||  or    !
 
+  Compound:       +=  -=  *=  /=  %=
 
-OPERATORS:
-----------
-  +  -  *  /  %           Arithmetic  (+ also concatenates strings/lists)
-                          "hello " + 42 auto-converts to "hello 42"
-  ==  !=                  Equality
-  <  >  <=  >=            Comparison
-  =>  =<                  Reversed comparison (same as >= and <=)
-  &&  and                 Logical AND
-  ||  or                  Logical OR
-  !                       Logical NOT
-  &                       Address-of (pointer)
-  *                       Dereference (pointer)
+  Increment:      i++  ++i  i--  --i
 
+  Pointer:        *p  (dereference)
+                  &  is NOT supported (no address-of operator)
 
-COMPOUND ASSIGNMENT:
---------------------
-  i += 5;       // i = i + 5
-  i -= 3;       // i = i - 3
-  i *= 2;       // i = i * 2
-  i /= 4;       // i = i / 4
-  i %= 3;       // i = i % 3
+────────────────────────────────────────────────────────────────────────────────
+MANUAL MEMORY
+────────────────────────────────────────────────────────────────────────────────
 
+  int* p = alloc int(42);    allocate an int on the heap
+  print(*p);                 dereference to read → 42
+  *p = 99;                   dereference to write
+  free p;                    free the allocation
 
-INCREMENT / DECREMENT:
-----------------------
-  i++;          // equivalent to i = i + 1;
-  ++i;          // equivalent to i = i + 1;
-  i--;          // equivalent to i = i - 1;
-  --i;          // equivalent to i = i - 1;
+  Supported pointer operations:
+    alloc type(value)        create pointer
+    free p                   release pointer
+    *p                       dereference (read or write)
+    q = p                    alias — q points to same address
+    foo(p)                   pass as argument
+    return (p)               return from function (declared int*)
+    append(list, p)          store in list
+    map["key"] = p           store in map
 
+  NOT supported:
+    &x                       address-of — variables have no stable heap address
+    p + 1                    pointer arithmetic
+    (int*)p                  type casting
 
-IMPORTS (MODULES):
-------------------
-  Use the 'use' keyword to import functions from other .42AHH files.
-  Imported files must be in the SAME DIRECTORY as the main file.
+  Safety checks (always active regardless of directives):
+    use-after-free           → [Tantrums Runtime Error] Null pointer dereference!
+    double-free              → [Tantrums Runtime Error] Null pointer dereference!
+    null dereference         → [Tantrums Runtime Error] Null pointer dereference!
 
-  use helper.42AHH;             // imports all functions from helper.42AHH
-  use math_utils.42AHH;         // imports all functions from math_utils.42AHH
+  Escape analysis (with #autoFree true):
+    if pointer is provably local (not returned, not passed, not aliased)
+    → compiler inserts free automatically
+    → emits: [Tantrums] note: auto-freed 'p' at line X (provably local)
 
-  // Then call imported functions directly:
-  print(helper_function(42));
+  Escape conditions (compiler skips auto-free if ANY are true):
+    1. pointer appears in a return statement
+    2. pointer passed as function argument
+    3. pointer passed to append()
+    4. pointer assigned to another variable (alias)
+    5. pointer stored in a map
+    6. pointer assigned to a global variable
+    7. pointer appears in any conditional branch
+    8. pointer used in complex expression
+    9. pointer used in more than one distinct way
+
+────────────────────────────────────────────────────────────────────────────────
+LEAK DETECTION
+────────────────────────────────────────────────────────────────────────────────
+
+  On program exit, if any alloc'd pointers were not freed:
+
+  ≤5 leaks — printed to console:
+    [Tantrums Warning] Memory leak detected: 3 allocation(s) not freed
+      alloc at line 4 in main — int (96 bytes)
+      alloc at line 7 in foo  — int (96 bytes)
+      alloc at line 9 in main — int (96 bytes)
+    Total Leaked Memory: 288 bytes = 0.28 KB
+
+  >5 leaks — redirected to memleaklog.txt in same directory as .42ass:
+    [Tantrums Warning] Memory leak detected: 47 allocation(s) not freed.
+    See memleaklog.txt in the same directory as the executing bytecode.
+
+  memleaklog.txt format:
+    TANTRUMS MEMORY LEAK REPORT
+    ============================
+    Executable: main.42ass
+    Leaks: 47 allocations
+    ============================
+      alloc at line 8 in main — int (96 bytes) [x47]
+    ============================
+    SUMMARY
+      Total leaked: 4,512 bytes
+                  = 4.41 KB
+                  = 0.00 MB
+                  = 0.00 GB
+    ============================
+
+────────────────────────────────────────────────────────────────────────────────
+IMPORTS
+────────────────────────────────────────────────────────────────────────────────
+
+  use helper.42AHH;              import all functions from helper.42AHH
+  use math_utils.42AHH;          same directory only
 
   Notes:
-  - Duplicate imports are ignored (import each file only once)
+  - Duplicate imports are ignored
   - Circular imports are prevented
-  - Imported functions/globals are available for type checking
-  - If the file is not found, compilation fails with an error
+  - Imported functions available for type checking
 
+────────────────────────────────────────────────────────────────────────────────
+BUILT-IN FUNCTIONS
+────────────────────────────────────────────────────────────────────────────────
 
-TYPE CHECKING:
---------------
-  When you declare types, the compiler enforces them at compile-time.
-  It will refuse to compile if types don't match:
+  print(x)                   print any value to console
+  input("prompt")            read line from user (return type depends on variable)
+  len(x)                     length of string, list, or map
+  range(end)                 list [0, 1, ..., end-1]
+  range(start, end)          list [start, ..., end-1]
+  range(start, end, step)    list [start, start+step, ..., < end]
+  type(x)                    returns type name as string
+  append(list, value)        appends value to list
 
-  tantrum int add(float a, float b)     // typed params
-  {
-      return (a + b);
-  }
+  INPUT TYPE CASTING:
+    x = input("prompt");           → string (default)
+    string s = input("prompt");    → string
+    int n = input("Enter num: ");  → parses as integer
+    float f = input("Decimal: ");  → parses as float
+    bool b = input("Yes? ");       → "true"→true, "false"→false,
+                                     empty/whitespace→false, any other→true
 
-  print(add("hello", "world"));         // ERROR: param 1 expects 'float' but got 'string'
+  TIMING:
+    getCurrentTime()               Unix epoch timestamp in milliseconds
+    toSeconds(ms)                  convert ms to seconds (float)
+    toMilliseconds(ms)             convert ms to milliseconds (float)
+    toMinutes(ms)                  convert ms to minutes (float)
+    toHours(ms)                    convert ms to hours (float)
 
-  int x = "hello";                      // ERROR: cannot assign 'string' to 'int'
-  int y = 42;
-  y = "oops";                           // ERROR: cannot assign 'string' to 'int'
+  MEMORY PROFILING:
+    getProcessMemory()             process RSS in bytes
+    getVmMemory()                  Tantrums-managed heap in bytes
+    getVmPeakMemory()              peak VM heap usage in bytes
+    bytesToKB(bytes)               bytes → KB (float)
+    bytesToMB(bytes)               bytes → MB (float)
+    bytesToGB(bytes)               bytes → GB (float)
 
-  // Untyped (dynamic) variables accept anything — no errors:
-  z = 42;
-  z = "hello";                          // OK, z is dynamic
+────────────────────────────────────────────────────────────────────────────────
+ERROR HANDLING
+────────────────────────────────────────────────────────────────────────────────
 
+  throw "Something went wrong!";          halts with error message
 
-BUILT-IN FUNCTIONS:
--------------------
-  print(x);               Prints to console (any type)
-  len(x);                 Length of string, list, or map
-  range([start], end, [step]); Returns list [start, start+step, ..., end)
-  type(x);                Returns type name as string
-  append(list, value);    Appends value to a list
-
-  getCurrentTime();       Returns current system Unix Epoch time natively in milliseconds
-  toSeconds(ms);          Returns a float parsing input milliseconds to standard seconds
-  toMilliseconds(ms);     Returns a float parsing input milliseconds to ms
-  toMinutes(ms);          Returns a float parsing input milliseconds to minutes
-  toHours(ms);            Returns a float parsing input milliseconds to hours
-
-  getProcessMemory();     Returns Resident Set Size (RSS) of the Tantrums process in bytes
-  getVmMemory();          Returns current Tantrums-managed heap usage in bytes
-  getVmPeakMemory();      Returns highest observed value of VM allocations in bytes
-  bytesToKB(bytes);       Returns a float converting raw bytes to Kilobytes
-  bytesToMB(bytes);       Returns a float converting raw bytes to Megabytes
-  bytesToGB(bytes);       Returns a float converting raw bytes to Gigabytes
-
-  input("prompt");        Reads line from user. Return type depends on
-                          the variable declaration:
-
-    x = input("prompt");         -> returns string (default)
-    string s = input("prompt");  -> returns string
-    int n = input("Enter num");  -> parses input as integer
-    float f = input("Decimal");  -> parses input as float
-    bool b = input("Yes?");      -> bool rules:
-                                      "true"  -> true
-                                      "false" -> false
-                                      empty / spaces / tabs / just Enter -> false
-                                      any letters (a-z, A-Z) or digits -> true
-
-
-MEMORY (MANUAL):
-----------------
-  x = alloc int(42);      // manually allocate
-  print(*x);              // dereference pointer
-  free x;                 // manually free
-
-
-ERROR:
-------
-  throw "Something went wrong!";   // halts program with error message
-
-
-TRY / CATCH (Error Handling):
-----------------------------
-  try
-  {
-      // risky code
-      throw "something broke";
-  }
-  catch (e)
-  {
-      print("Caught error: " + e);
-  }
-
-  // Without error variable:
   try
   {
       throw "oops";
   }
-  catch
+  catch (e)
   {
-      print("Something failed, but we don't care what.");
+      print("Caught: " + e);
   }
 
-  // Nested try/catch works too:
+  // Without error variable:
+  try { throw "fail"; }
+  catch { print("Something failed"); }
+
+  // Nested with rethrow:
   try
   {
-      try
-      {
-          throw "inner";
-      }
+      try { throw "inner"; }
       catch (e)
       {
           print("Inner: " + e);
@@ -326,9 +398,10 @@ TRY / CATCH (Error Handling):
       print("Outer: " + e);
   }
 
+────────────────────────────────────────────────────────────────────────────────
+STRING ESCAPE SEQUENCES
+────────────────────────────────────────────────────────────────────────────────
 
-STRING ESCAPE SEQUENCES:
------------------------
   \n   newline
   \t   tab
   \\   backslash
@@ -336,53 +409,103 @@ STRING ESCAPE SEQUENCES:
   \r   carriage return
   \0   null character
 
-  Example: print("Hello\nWorld");   // prints on two lines
+────────────────────────────────────────────────────────────────────────────────
+COMMENTS
+────────────────────────────────────────────────────────────────────────────────
 
-
-COMMENTS:
----------
-  // This is a single-line comment
-
-  /* This is a
-     multi-line comment */
+  // single-line comment
+  /* multi-line
+     comment */
 
 
 ================================================================================
-COMPLETE EXAMPLE PROGRAM
+COMPLETE EXAMPLE PROGRAMS
 ================================================================================
+
+── BASIC ──────────────────────────────────────────────────────────────────────
 
   // fibonacci.42AHH
-
   tantrum int fib(int n)
   {
-      if (n <= 1)
-      {
-          return (n);
-      }
+      if (n <= 1) { return (n); }
       return (fib(n - 1) + fib(n - 2));
   }
 
-  tantrum main()
+  tantrum void main()
   {
-      print("Fibonacci sequence:");
-      for i in range(10)
+      for i in range(10) { print(fib(i)); }
+  }
+
+── MEMORY MANAGEMENT ──────────────────────────────────────────────────────────
+
+  // manual.42AHH
+  #autoFree false;
+
+  tantrum int* makeNum(int val)
+  {
+      int* p = alloc int(val);
+      return (p);
+  }
+
+  tantrum void main()
+  {
+      int* a = makeNum(42);
+      int* b = makeNum(99);
+      print(*a + *b);    // 141
+      free a;
+      free b;
+  }
+
+── STRICT STATIC TYPING ───────────────────────────────────────────────────────
+
+  // strict.42AHH
+  #mode static;
+
+  tantrum int add(int a, int b)
+  {
+      return (a + b);
+  }
+
+  tantrum void main()
+  {
+      int result = add(10, 20);
+      print(result);
+  }
+
+── PROFILING ──────────────────────────────────────────────────────────────────
+
+  // bench.42AHH
+  tantrum void main()
+  {
+      int start = getCurrentTime();
+
+      int sum = 0;
+      for i in range(1000000)
       {
-          print(fib(i));
+          sum += i;
       }
 
-      list names = ["Alice", "Bob", "Charlie"];
-      for name in names
-      {
-          print("Hello, " + name + "!");
-      }
+      int end = getCurrentTime();
+      print("Sum: " + sum);
+      print("Time: " + toSeconds(end - start) + "s");
+      print("RAM: " + bytesToMB(getProcessMemory()) + " MB");
+  }
 
-      int x = 100;
-      if (x >= 50 and x =< 200)
-      {
-          print("x is between 50 and 200");
-      }
+── ARENA ALLOCATION ───────────────────────────────────────────────────────────
 
-      print("Done!");
+  // arena.42AHH
+  // Intentional arena pattern — allocate, use, let OS reclaim on exit
+  #autoFree false;
+  #allowMemoryLeaks true;
+
+  tantrum void main()
+  {
+      int* a = alloc int(1);
+      int* b = alloc int(2);
+      int* c = alloc int(3);
+      print(*a + *b + *c);    // 6
+      // intentionally not freed — OS reclaims on exit
+      // exit report will note 3 leaks with #allowMemoryLeaks true
   }
 
 
@@ -392,10 +515,11 @@ BUILD FROM SOURCE
 
   Requirements: CMake 3.15+, C++23 compiler (MSVC / GCC / Clang)
 
-  cmake -B build -S .
-  cmake --build build
+  # Release build (recommended — debug is ~2x slower)
+  cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+  cmake --build build --config Release
 
-  Then run:
-  .\build\Debug\tantrums.exe run your_program.42AHH
+  # Run
+  .\build\Release\tantrums.exe run your_program.42AHH
 
 ================================================================================

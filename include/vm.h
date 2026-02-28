@@ -23,6 +23,14 @@ typedef struct {
 
 #define MAX_LOCAL_SCOPES 1024
 
+typedef struct {
+    const char* func_name;
+    const char* type_name;
+    int line;
+    size_t size;
+    int count;
+} AutoFreeRecord;
+
 struct VM {
     CallFrame frames[MAX_FRAMES];
     int       frame_count;
@@ -34,6 +42,10 @@ struct VM {
     int       handler_count;
     int       scope_depth;
     Value*    scope_base_slots[MAX_LOCAL_SCOPES];
+    AutoFreeRecord* auto_free_records;
+    int       auto_free_capacity;
+    int       auto_free_count;
+    int       total_auto_frees;
 };
 
 typedef enum {

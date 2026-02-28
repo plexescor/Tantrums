@@ -202,6 +202,17 @@ static Token scan_token(Lexer* l) {
     case '<': return make_token(l, match(l, '=') ? TOKEN_LESS_EQUAL : TOKEN_LESS);
     case '>': return make_token(l, match(l, '=') ? TOKEN_GREATER_EQUAL : TOKEN_GREATER);
     case '"': return scan_string(l);
+    case '#': {
+        while (!is_at_end(l) && isalpha(peek(l))) advance(l);
+        int len = (int)(l->current - l->start);
+        if (len == 9 && memcmp(l->start, "#autoFree", 9) == 0) {
+            return make_token(l, TOKEN_AUTOFREE_KW);
+        }
+        if (len == 17 && memcmp(l->start, "#allowMemoryLeaks", 17) == 0) {
+            return make_token(l, TOKEN_ALLOW_LEAKS_KW);
+        }
+        return error_token(l, "Unknown directive.");
+    }
     }
     return error_token(l, "Unexpected character.");
 }

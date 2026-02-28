@@ -12,6 +12,7 @@ size_t tantrums_next_gc = 1024 * 1024;
 
 extern Obj* all_objects;
 extern VM* current_vm_for_gc;
+extern bool global_allow_leaks;
 
 void* tantrums_realloc(void* ptr, size_t old_size, size_t new_size) {
     tantrums_bytes_allocated += new_size;
@@ -110,6 +111,9 @@ void tantrums_free_all_objects(void) {
 
         fprintf(out_file, "\nTANTRUMS MEMORY LEAK REPORT\n");
         fprintf(out_file, "============================\n");
+        if (global_allow_leaks) {
+            fprintf(out_file, "Note: #allowMemoryLeaks true — leaks permitted by developer.\n");
+        }
         fprintf(out_file, "Executable: %s\n", exec_name);
         fprintf(out_file, "Leaks: %s allocations\n", count_str);
         fprintf(out_file, "============================\n");

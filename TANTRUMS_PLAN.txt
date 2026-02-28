@@ -7,7 +7,7 @@ This file is the single source of truth for the Tantrums language.
 Any AI or developer working on this project should read this FIRST.
 Expand sections as decisions are made. Mark undecided items with [TBD].
 
-Last updated: 2026-02-25
+Last updated: 2026-02-28
 
 
 ================================================================================
@@ -15,30 +15,56 @@ SECTION 1: OVERVIEW
 ================================================================================
 
 Language Name    : Tantrums
-File Extension   : .42AHH
-Written In       : C and C++ (pure, no external deps for core)
-Execution Model  : Bytecode interpreter (v1), Native compiler (v2, later)
-                   - "tantrums run file.42AHH"   → interpreted via bytecode VM
-                   - "tantrums build file.42AHH"  → compiled to native binary (future)
+File Extension   : .42AHH (source) / .42ass (compiled bytecode)
+Written In       : C++ (C++23, no external deps for core)
+Execution Model  : Bytecode interpreter (current), Native compiler (future)
+Current Version  : 0.2.0
+
+CLI:
+  tantrums run file.42AHH       compile + execute
+  tantrums compile file.42AHH   compile only → .42ass
+  tantrums exec file.42ass       execute precompiled bytecode
+
+Flags:
+  --no-autofree-notes            suppress auto-free compiler notes
 
 
 ================================================================================
 SECTION 2: TYPE SYSTEM
 ================================================================================
 
-Mode: Dual — switchable per file
-  - Default: Dynamic typing (no type annotations needed)
-  - Optional: Static typing, enabled by putting "strict;" at top of file
+Mode: Dual — switchable per file via #mode directive
 
-Built-in Types (v1):
-  - int       : integer numbers
-  - float     : floating point numbers
-  - string    : immutable, UTF-8 text
-  - bool      : explicit true / false only (no truthy/falsy like JS)
-  - list      : ordered, mutable, dynamic-size collection (NOT arrays). Unassigned `list items;` default to `[]`.
-  - map       : key-value dictionary. Unassigned `map kv;` default to `{}`.
+Built-in Types:
+  int       integer numbers
+  float     floating point numbers
+  string    immutable, UTF-8 text (treated as list of characters)
+  bool      true / false only (no truthy/falsy)
+  list      ordered, mutable, dynamic-size collection. Unassigned → []
+  map       key-value dictionary. Unassigned → {}
+  void      return type for functions that return nothing (static mode)
+  int*      pointer to int (extendable to float*, string*, etc.)
 
-[TBD] Additional types for future versions
+Mode Directives (#mode):
+  #mode static;     ALL variables must have type annotations.
+                    ALL functions must declare return types.
+                    ALL code paths must return.
+                    Return type mismatches are compile errors.
+                    void functions cannot return values.
+                    void functions cannot be used in expressions.
+
+  #mode dynamic;    NO type checking. Types are decorative only.
+
+  #mode both;       DEFAULT. Typed vars are checked, untyped are free.
+
+Type Checking Rules (static mode):
+  - Function missing return type → compile error
+  - Non-void function missing return → compile error
+  - Not all code paths return → compile error
+  - Return type mismatch → compile error
+  - void function returns value → compile error
+  - void function used in expression → compile error
+  - pointer return (int*) must return a pointer variable
 
 
 ================================================================================
@@ -47,129 +73,209 @@ SECTION 3: SYNTAX RULES
 
 Style: C-like, brace-delimited { }
        NO indentation-based syntax. Ever.
+       Semicolons required after statements.
+       Parentheses required around return values: return (x);
+       Parentheses required around conditions: if (x > 0)
 
-Variable:
-int x = 5;
-x = 5; (both dynamic and static)
+Keywords:
+  tantrum      function declaration keyword
+  return       return from function, must use parens: return (value);
+  if           conditional
+  else         alternative branch
+  for          for-in loop
+  while        while loop
+  in           for-in loop separator
+  break        exit loop
+  continue     skip to next iteration
+  true         boolean literal
+  false        boolean literal
+  alloc        manual heap allocation: int* p = alloc int(42);
+  free         manual heap deallocation: free p;
+  throw        throw error: throw "message";
+  try          error handling block
+  catch        error catch block
+  use          import: use helper.42AHH;
+  and          logical AND (alias for &&)
+  or           logical OR (alias for ||)
+  void         void return type (static mode)
 
-both: int x = 5;
-        x = 5;
+Directives (file-level, must appear before any code):
+  #mode static / dynamic / both
+  #autoFree true / false
+  #allowMemoryLeaks true / false
 
-functions:
-tantrum _returnType_ name(args)
-{
-    //Do something 
-} //Return type not mandatory
+  Ordering rule: #mode → #autoFree → #allowMemoryLeaks
 
-If statement:
+Function syntax:
+  tantrum returnType name(paramType paramName, ...)
+  {
+      // body
+      return (value);
+  }
 
-if (condition)
-{
-    //Do something
-}
-else if (condition)
-{
-    //Do something
-}
-else
-{
-    //Do something
-}
-
-
-for loop:
-Python style
-for i in range(10)
-{
-    //Do something
-}
-
-//Can also take strings and lists
-
-for i in "Hello"
-{
-    //Do something
-}
-for i in [1, 2, 3, 4, 5]
-{
-    //Do something
-}
-
-//Same concept for while loop
-while (condition)
-{
-    //Do something
-}
+  Return type is optional in #mode both and #mode dynamic.
+  Return type is mandatory in #mode static.
+  Pointer return type syntax: tantrum int* foo()
 
 Operators:
-+
--
-/
-*
-%
-==
-!=
-<
->
-<=
->=
-=>
-=<
-(//For greater than or equal to and same typa shit for all thing, they can be reversed, liek this: => or =<)
-&& (//Can also be "and")
-|| (//Can also be "or")
-!
+  Arithmetic:     + - * / %
+  Comparison:     == != < > <= >= => =<    (=> and =< are aliases for >= and <=)
+  Logical:        && || !   (also: and or)
+  Compound:       += -= *= /= %=
+  Increment:      i++ ++i i-- --i
+  Pointer:        * (dereference only — no address-of &, no arithmetic)
+  String concat:  + auto-converts any type to string when one operand is string
 
-Comment syntax:
-  - // for single-line comments
-  - /* for multi-line comments
-  - /* ... */
-
-//String treated as a literal list of characters
-
---- ADD SYNTAX RULES BELOW AS THEY ARE DECIDED ---
-
+NOT SUPPORTED:
+  & (address-of)              variables live in VM stack slots, no stable address
+  Pointer arithmetic          p + 1, p++, etc.
+  Type casting                (int*)p
 
 
 ================================================================================
 SECTION 4: MEMORY MANAGEMENT
 ================================================================================
 
-Dual-mode memory:
+Tantrums has a THREE-DIRECTIVE memory system. Philosophy per file.
 
-  AUTO (default):
-    - Reference counting with cycle collector
-    - User never thinks about memory
-    - Objects freed automatically when no longer referenced
+── DIRECTIVE 1: #autoFree ──────────────────────────────────────────────────────
 
-  MANUAL (opt-in):
-    - Simple alloc / free keywords
-    - Example: x = alloc int(42);
-              free x;
-    - No malloc/sizeof nonsense
+  #autoFree true   (DEFAULT)
+    Compile-time escape analysis runs on every alloc'd pointer.
+    If provably local → compiler inserts free() in bytecode automatically.
+    If ambiguous → runtime auto-free fires at scope exit.
+    Compile-time leak errors active (scope exit, reassignment, early return).
+    All runtime safety checks active.
 
-Pointers:
-    - Exist, use & (address-of) and * (dereference) like C
-    - Safe by default: null dereference = clean error, NOT a segfault
-    - NO pointer arithmetic allowed
-    - Example: p = &x;
-              print(*p);
-              *p = 20;
+  #autoFree false
+    Compile-time auto-free DISABLED.
+    Runtime auto-free DISABLED.
+    Compile-time scope/return leak errors DISABLED.
+    Reassignment-without-free error STILL ACTIVE (always).
+    Exit leak detector STILL ACTIVE.
+    Runtime safety checks STILL ACTIVE (use-after-free, double-free, null deref).
+
+── DIRECTIVE 2: #allowMemoryLeaks ──────────────────────────────────────────────
+
+  REQUIRES #autoFree false declared first. Contradicts auto-free.
+
+  #allowMemoryLeaks false  (DEFAULT)
+    Compile-time leak errors abort compilation.
+
+  #allowMemoryLeaks true
+    Compile-time leak errors become warnings only. Does not abort.
+    Program compiles and runs with leaked pointers.
+    Exit leak report still runs.
+    Runtime safety still active.
+    Use case: arena allocation, parsers, CLI tools that exit quickly.
+
+── VALID COMBINATIONS ───────────────────────────────────────────────────────────
+
+  #autoFree true  + #allowMemoryLeaks false   → default Tantrums
+  #autoFree false + #allowMemoryLeaks false   → C-style manual memory
+  #autoFree false + #allowMemoryLeaks true    → arena/region style
+  #autoFree true  + #allowMemoryLeaks true    → INVALID, compile error
+
+── POINTER SYSTEM ───────────────────────────────────────────────────────────────
+
+  Creation:
+    int* p = alloc int(42);     only way to create a pointer
+
+  Valid operations:
+    print(*p)                   dereference read
+    *p = 99                     dereference write
+    free p                      free allocation
+    q = p                       alias (q points to same address as p)
+    foo(p)                      pass as argument
+    return (p)                  return from int* function
+    append(list, p)             store in list
+    map["key"] = p              store in map
+
+  Not supported:
+    &x                          no address-of operator
+    p + 1                       no pointer arithmetic
+    (int*)p                     no type casting
+
+── ESCAPE ANALYSIS ──────────────────────────────────────────────────────────────
+
+  Runs post-parse for every alloc'd pointer (with #autoFree true).
+  Conservative rule: when in doubt → skip everything.
+
+  Escape conditions (ANY = skip auto-free and leak error):
+    1. pointer appears in any return statement
+    2. pointer passed as argument to any function call
+    3. pointer passed to append()
+    4. pointer assigned to another variable (alias)
+    5. pointer stored in a map value
+    6. pointer assigned to a global variable
+    7. pointer appears anywhere inside a conditional (if/while/for)
+    8. pointer used in complex expression beyond simple *p read/write
+    9. pointer appears in any operator expression
+    10. pointer used in more than one distinct way after declaration
+
+  Priority order:
+    1. escape detected → do nothing, trust developer
+    2. manual free exists → do nothing, developer handled it
+    3. provably local → insert auto-free in bytecode + emit note
+    4. ambiguous → do nothing, runtime handles it
+
+── MEMORY SAFETY STACK ─────────────────────────────────────────────────────────
+
+  Layer 1: Compile-time escape analysis     no false positives
+  Layer 2: Compile-time auto-free           provably local pointers
+  Layer 3: Runtime auto-free               scope exit safety net
+  Layer 4: Runtime use-after-free          error + line number (always)
+  Layer 5: Runtime double-free             error + line number (always)
+  Layer 6: Runtime null dereference        error + line number (always)
+  Layer 7: Exit leak detector              full report + memleaklog.txt
+
+── LEAK DETECTION ───────────────────────────────────────────────────────────────
+
+  On exit, unfreed alloc'd pointers are reported.
+  ≤5 leaks → printed to console with line numbers, types, sizes, totals.
+  >5 leaks → brief console notice + full report in memleaklog.txt.
+  Repeated same-line leaks are deduplicated: [x2000000].
+  Totals shown in bytes, KB, MB, GB as they scale.
+  Runtime auto-freed pointers are NOT reported as leaks.
 
 
 ================================================================================
 SECTION 5: BUILT-IN FUNCTIONS
 ================================================================================
 
-Core built-ins (always available, no import needed):
-  print(x) : Prints x to the console
-  int x = input("Enter something: ") : Takes input from the user 
-  len(x)   : Returns the length of x
-  getCurrentTime() : Returns the current Unix Epoch system timestamp explicitly in milliseconds.
-  toSeconds(ms) / toMilliseconds(ms) / toMinutes(ms) / toHours(ms) : Conversion functions formatting milliseconds delta.
+Always available, no import needed.
 
---- ADD BUILT-IN FUNCTIONS BELOW AS THEY ARE DECIDED ---
+Core:
+  print(x)                   any type to console
+  input("prompt")            read from user, return type depends on variable
+  len(x)                     length of string, list, or map
+  range(end)                 [0 .. end-1]
+  range(start, end)          [start .. end-1]
+  range(start, end, step)    [start, start+step, ..., < end]
+  type(x)                    type name as string
+  append(list, value)        append to list
 
+Timing:
+  getCurrentTime()            Unix epoch milliseconds
+  toSeconds(ms)               ms → seconds (float)
+  toMilliseconds(ms)          ms → ms (float)
+  toMinutes(ms)               ms → minutes (float)
+  toHours(ms)                 ms → hours (float)
+
+Memory profiling:
+  getProcessMemory()          process RSS in bytes
+  getVmMemory()               Tantrums heap usage in bytes
+  getVmPeakMemory()           peak Tantrums heap in bytes
+  bytesToKB(bytes)            → KB (float)
+  bytesToMB(bytes)            → MB (float)
+  bytesToGB(bytes)            → GB (float)
+
+Input type casting rules:
+  x = input()                 → string
+  int n = input()             → parsed as int
+  float f = input()           → parsed as float
+  bool b = input()            → "true"→true, "false"→false,
+                                 empty/whitespace→false, any other→true
 
 
 ================================================================================
@@ -177,142 +283,242 @@ SECTION 6: MODULE SYSTEM
 ================================================================================
 
 Import keyword: use
-Syntax: use <module_name>
+Syntax: use filename.42AHH;
 
-Modules are implemented as C/C++ native code registered into the VM.
-No header files, no preprocessor.
+Rules:
+  - Same directory only
+  - Duplicate imports ignored
+  - Circular imports prevented
+  - Imported functions available for type checking
 
-C/C++ FFI (Foreign Function Interface):
-  - Tantrums can call C/C++ functions directly
-  - Syntax:
-      foreign "C" {
-          sin(x: float) -> float;
-          cos(x: float) -> float;
-      }
+Planned future modules:
+  v2.0: math, fs, io
+  v3.0: window (Win32/GLFW/SDL2), graphics (OpenGL)
+  v4.0: graphics-vulkan, audio, net
 
-Standard Modules (planned):
-  v2: math, fs, io
-  v3: window (wraps GLFW/SDL2), graphics (wraps OpenGL)
-  v4: graphics-vulkan (wraps Vulkan), audio, net
-
-
-================================================================================
-SECTION 7: PLANNED MODULES — GRAPHICS & WINDOWING
-================================================================================
-
-Vision: Tantrums should support game dev / graphics programming.
-
-  - window   : Window creation, input, events (wraps GLFW or SDL2)
-  - graphics : Rendering (wraps OpenGL for v1, Vulkan for v2)
-  - audio    : [TBD]
-  - net      : [TBD]
-
-These modules are C/C++ code under the hood. The user calls clean
-Tantrums functions and never touches C.
+C/C++ FFI (planned):
+  foreign "C" {
+      sin(x: float) → float;
+      cos(x: float) → float;
+  }
 
 
 ================================================================================
-SECTION 8: ERROR HANDLING
+SECTION 7: ERROR HANDLING
 ================================================================================
 
-Errors via console, like to throw an error intentionally, user can:
+Throw:
+  throw "error message";       halts program with error
 
-throw "Error message";
-
-With try, catch blocks,
-the bytecode runner will throw errors idk: TBD
-
-No exceptions (too complex to implement in the VM).
+Try/Catch:
+  try { ... } catch (e) { ... }
+  try { ... } catch { ... }    (without variable)
+  Nested try/catch supported.
+  Rethrow supported: throw e; inside catch.
 
 
 ================================================================================
-SECTION 9: COMPILER / INTERPRETER ARCHITECTURE
+SECTION 8: COMPILER / VM ARCHITECTURE
 ================================================================================
 
 Pipeline:
-  Source (.42AHH)  →  Lexer (tokens)
-                   →  Parser (AST)
-                   →  Semantic Analysis (type check, variable resolution)
-                   →  Code Generator (bytecode)
-                   →  VM (executes bytecode)
+  .42AHH source
+    → Lexer (tokens)
+    → Parser (AST)
+    → Semantic Analysis (type check, escape analysis, variable resolution)
+    → Code Generator (bytecode + auto-free injection)
+    → .42ass binary (includes directive flags in header)
+    → VM (reads flags from header, executes bytecode)
 
-Project structure (planned):
+Project structure:
   src/
-    lexer.c           Tokenizer
-    parser.c          AST builder
-    ast.h             AST node definitions
-    compiler.c        AST → Bytecode
-    vm.c              Bytecode executor
-    value.c           Value types (int, string, list, etc.)
-    memory.c          Reference counting + GC
-    builtins.c        Core built-in functions
-    modules/
-      mod_math.c      math module
-      mod_fs.c        file system module
-      mod_io.c        I/O module
-  include/
-    *.h               Headers
-  main.c              Entry point, REPL
+    main.cpp              Entry point, CLI
+    lexer.cpp             Tokenizer
+    parser.cpp            Recursive descent parser → AST
+    compiler.cpp          AST → bytecode, type checking, escape analysis
+    vm.cpp                Stack-based VM, scope tracking, runtime auto-free
+    builtins.cpp          Built-in functions
+    value.cpp             Value types, string interning
+    memory.cpp            Leak detection, tracking, log generation
+    ast.cpp               AST node allocation/deallocation
+    bytecode_file.cpp     .42ass serialization/deserialization
+  include/                Header files
+  tantrums-vscode/        VS Code extension
 
-Core engine in C for speed. Module glue and higher-level
-parts can use C++ for convenience (std::unordered_map etc).
+VM design:
+  Stack-based bytecode VM
+  Variables in indexed call frame slots (not heap objects)
+  Values are raw 8-byte stack entries (no boxing for primitives)
+  Scope depth tracked per frame for runtime auto-free
+  Directive flags baked into .42ass header — VM reads on startup
+
+Why faster than Python:
+  Python: every int is a 28-byte heap object with refcount + type dispatch
+  Tantrums: raw 8-byte value on stack, no object, no refcount, no dispatch
+  Result: 11x faster on tight integer loops (measured, not estimated)
 
 
 ================================================================================
-SECTION 10: VERSIONING / ROADMAP
+SECTION 9: VERSIONING / ROADMAP
 ================================================================================
 
-v1 — Core language:
-  [ ] Lexer, parser, AST
-  [ ] Bytecode compiler + VM
-  [ ] Variables, functions, control flow
-  [ ] Built-in types (int, float, string, bool, list, map)
-  [ ] Reference counting memory
-  [ ] Manual memory (alloc/free)
-  [ ] Pointers (safe)
-  [ ] Core built-in functions
-  [ ] REPL
+v0.1.0 — initial release (done):
+  [x] Lexer, parser, AST
+  [x] Bytecode compiler + VM
+  [x] Variables, functions, control flow
+  [x] Built-in types (int, float, string, bool, list, map)
+  [x] Manual memory (alloc/free)
+  [x] Safe pointers (* dereference, use-after-free/double-free detection)
+  [x] Core built-in functions
+  [x] Cross-platform bytecode
+  [x] Error handling (throw, try/catch, nested rethrow)
+  [x] Type checking (#mode static/dynamic/both)
+  [x] Module imports (use keyword, circular import prevention)
+  [x] VS Code extension (syntax highlighting, IntelliSense, hover, commands)
+  [x] Built-in profiling (timing + memory functions)
 
-v2 — Standard library + FFI:
-  [ ] Module system (use keyword)
-  [ ] C/C++ FFI (foreign keyword)
-  [ ] math, fs, io modules
-  [ ] Static typing mode (strict;)
+v0.2.0 — memory system (done):
+  [x] Compile-time escape analysis (10 escape conditions, conservative rule)
+  [x] Compile-time auto-free (provably local pointers)
+  [x] Runtime auto-free (scope exit safety net)
+  [x] Exit leak detector (line numbers, types, sizes, deduplication, log)
+  [x] memleaklog.txt (>5 leaks redirected, grouped, timestamped)
+  [x] #autoFree directive (true/false, baked into bytecode header)
+  [x] #allowMemoryLeaks directive (requires #autoFree false)
+  [x] void keyword
+  [x] int* return type syntax (tantrum int* foo())
+  [x] #mode static return enforcement (all paths, type match, void rules)
+  [x] Compile-time false positive fix (escape analysis prevents wrong errors)
 
-v3 — Graphics:
-  [ ] window module (GLFW/SDL2)
+v1.0 — stability + bug fixes (next):
+  [ ] Fix map integer read performance (hash function clustering)
+  [ ] Fix nested structures returning null (list of lists, map of lists)
+  [ ] Fix float return precision (2.5 * 4.0 returns 10 not 10.0)
+  [ ] Fix range() print returning null (iteration works, print broken)
+  [ ] Fix 30 Linux GCC warnings
+  [ ] Write WHY.md (design decisions documented)
+  [ ] Build one real demo program (snake, calculator, or similar)
+
+v2.0 — standard library:
+  [ ] Slab allocator (replace malloc for small objects, 5-10x allocation speed)
+  [ ] math module (sin, cos, sqrt, pow, abs, floor, ceil, log, etc.)
+  [ ] fs module (read, write, append, exists, delete, listdir)
+  [ ] io module
+  [ ] String module (split, trim, replace, indexOf, substring, toLower, toUpper)
+  [ ] Reference counting for pointer-in-container ownership
+
+v3.0 — graphics:
+  [ ] window module (Win32 native, then GLFW/SDL2 for cross-platform)
   [ ] graphics module (OpenGL)
+  [ ] audio module [TBD]
 
-v4 — Advanced:
-  [ ] Vulkan backend
-  [ ] Native compiler (transpile to C or LLVM)
-  [ ] audio, net modules
+v4.0 — JIT:
+  [ ] LLVM JIT backend
+  [ ] Hot loop detection + native compilation
 
-
-================================================================================
-SECTION 11: KEYWORDS (ACTIVE LIST)
-================================================================================
-
---- ADD KEYWORDS BELOW AS THEY ARE DECIDED ---
-
-Reserved so far:
-  STRICT       (enables static typing for the file)
-  true         (boolean literal)
-  false        (boolean literal)
-  alloc        (manual memory allocation)
-  free         (manual memory deallocation)
-  use          (import a module)
-  foreign      (declare C/C++ functions)
-
-return is return
+v5.0 — native compilation:
+  [ ] Full LLVM IR emission
+  [ ] Link-time optimization
+  [ ] SIMD auto-vectorization
+  [ ] Platform-specific tuning
 
 
 ================================================================================
-SECTION 12: CUSTOM INSTRUCTIONS / NOTES
+SECTION 10: KNOWN BUGS (v0.2.0)
 ================================================================================
 
---- ADD ANYTHING ELSE BELOW ---
+  BUG 1 — Map integer read performance
+    hash function uses key % buckets
+    sequential integer keys cluster into same buckets
+    50k sequential keys → O(n) reads instead of O(1)
+    17.6x slower than Python on integer map reads
+    Fix: replace with proper integer hash scrambling
 
+  BUG 2 — Nested structure null returns
+    list[0] returns null when value is a list or map
+    map["key"] returns null when value is a list or map
+    Only primitive values survive storage/retrieval in containers
+    Fix: store complex values by reference in container slots
+
+  BUG 3 — Float return precision
+    tantrum float multiply(float a, float b) { return (a * b); }
+    multiply(2.5, 4.0) returns 10 not 10.0
+    Typed float return losing precision / type annotation
+    Fix: preserve float type through return path
+
+  BUG 4 — range() print returns null
+    range(0, 50, 5) → iteration works correctly (sums are right)
+    print(range(0, 50, 5)) → prints null
+    Range object not converting to printable representation
+    Fix: implement range __str__ / print handler
+
+
+================================================================================
+SECTION 11: PERFORMANCE NOTES
+================================================================================
+
+Benchmarks (v0.1.0, i5-1235U, Windows, Release build):
+
+  Test                     Tantrums    Python      Ratio
+  ─────────────────────────────────────────────────────
+  Raw loop 100M            4.26s       46.86s      11x faster
+  Function calls 10M       0.597s      1.716s      2.87x faster
+  List 200k append         0.018s      0.075s      4.16x faster
+  List 200k iterate        0.013s      0.106s      8.15x faster
+  Map 50k int insert       0.006s      0.039s      6.5x faster
+  Map 50k int read         0.704s      0.040s      17.6x SLOWER (bug 1)
+  Map 10k string insert    0.004s      0.035s      8.75x faster
+  Baseline RAM             3.96 MB     30.18 MB    7.6x less
+  Overall test suite       5.722s      50.067s     8.75x faster
+
+Linux GCC Release is slightly faster than Windows MSVC Release
+for the same source due to GCC -O2/-O3 optimization quality.
+
+Performance projections:
+  v1.0 (bugs fixed):       ~12x faster than Python
+  v2.0 (slab allocator):   ~15x faster
+  v4.0 (JIT):              ~60-80x faster
+  v5.0 (LLVM native):      ~100-150x faster
+
+
+================================================================================
+SECTION 12: DESIGN DECISIONS & PHILOSOPHY
+================================================================================
+
+WHY .42AHH and .42ass?
+  42 → The Hitchhiker's Guide to the Galaxy (the answer to everything)
+  AHH → screaming in caps (the developer experience)
+  ass → the bytecode is called .42ass because why not
+  Memorable, unique, personality over convention.
+
+WHY tantrum as the function keyword?
+  Because writing a language makes you want to throw one.
+  Every other language uses: func, def, function, fn, sub, method.
+  Tantrums uses: tantrum. It fits the lore.
+
+WHY no GC?
+  GC pauses are death for game dev and real-time systems.
+  Tantrums targets game dev, desktop apps, CLI tools.
+  These domains need predictable allocation, not GC convenience.
+  The #autoFree system gives safety without GC overhead.
+  The #autoFree false mode gives C-level control.
+
+WHY no borrow checker?
+  Rust's borrow checker is brilliant but has a steep learning curve.
+  Tantrums optimizes for fun and accessibility.
+  The multi-layer safety system (escape analysis + runtime checks + leak detector)
+  catches most real bugs without requiring formal proof of ownership.
+
+WHY dual typing (#mode)?
+  Different problems need different approaches.
+  Prototyping = dynamic. Production libraries = static. General use = both.
+  One line at the top changes the entire philosophy.
+  No other language gives you this control per file.
+
+WHY built-in profiling?
+  Game dev and systems work require constant measurement.
+  No imports. No setup. Just call getCurrentTime() and getProcessMemory().
+  Zero ceremony for the most common profiling need.
 
 
 ================================================================================

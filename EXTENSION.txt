@@ -28,9 +28,11 @@ FEATURES — IMPLEMENTED
 
   SYNTAX HIGHLIGHTING:
   --------------------
-  [x] Keywords         tantrum, return, if, else, for, while, in, true, false,
-                       alloc, free, throw, and, or, use, try, catch
-  [x] Types            int, float, string, bool, list, map
+  [x] Keywords         tantrum, return, if, else, for, while, in, break,
+                       continue, true, false, alloc, free, throw, and, or,
+                       use, try, catch, void
+  [x] Types            int, float, string, bool, list, map, void
+  [x] Pointer types    int* in declarations and return types
   [x] Operators        + - * / % == != < > <= >= => =< && || ! & *
   [x] Compound ops     ++ -- += -= *= /= %=
   [x] Strings          "..." with escape sequences \n \t \\ \" \r \0
@@ -40,28 +42,41 @@ FEATURES — IMPLEMENTED
   [x] Built-ins        print, input, len, range, type, append (colored)
   [x] Function decls   tantrum keyword + function name in distinct colors
   [x] Typed variables  type + var name highlighted separately
+  [x] Pointer decls    int* p highlighted correctly
   [x] Import paths     use filename.42AHH shown as string
   [x] #mode directive  #mode keyword + static/dynamic/both highlighted
+  [x] #autoFree        #autoFree keyword + true/false highlighted
+  [x] #allowMemoryLeaks #allowMemoryLeaks keyword + true/false highlighted
 
   AUTOCOMPLETE / INTELLISENSE:
   ----------------------------
   [x] Snippet: tantrum function (with/without return type)
-  [x] Snippet: main() entry point
+  [x] Snippet: tantrum void function
+  [x] Snippet: tantrum int* function (pointer return)
+  [x] Snippet: main() entry point (void main)
   [x] Snippet: if / if-else / if-else if-else
   [x] Snippet: for-in loop / for-range loop
   [x] Snippet: while loop
   [x] Snippet: all built-in functions with parameter hints
   [x] Snippet: typed variable declarations (int, float, string, bool, list, map)
+  [x] Snippet: pointer declaration (int* p = alloc int(value);)
+  [x] Snippet: alloc/free pair
   [x] Snippet: input variants (int/float/bool input)
   [x] Snippet: use import, throw, alloc, return, len, append, type, range
   [x] Snippet: try/catch blocks (with/without error variable)
   [x] Snippet: #mode directive (static/dynamic/both picker)
-  [x] Autocomplete: all keywords and types
+  [x] Snippet: #autoFree directive (true/false picker)
+  [x] Snippet: #allowMemoryLeaks directive (true/false picker)
+  [x] Snippet: full manual memory file header (#autoFree false boilerplate)
+  [x] Snippet: full arena memory header (#autoFree false + #allowMemoryLeaks true)
+  [x] Autocomplete: all keywords and types including void
   [x] Autocomplete: user-defined functions (discovered from current file)
   [x] Autocomplete: variable names (discovered from current file)
   [x] Built-in functions show param signatures in detail popup
-  [x] Snippet: Time API routines (getCurrentTime, toSeconds, toMilliseconds, toMinutes, toHours)
-  [x] Snippet: Memory API (getProcessMemory, getVmMemory, getVmPeakMemory, bytesToKB, bytesToMB, bytesToGB)
+  [x] Snippet: Time API routines (getCurrentTime, toSeconds, toMilliseconds,
+               toMinutes, toHours)
+  [x] Snippet: Memory API (getProcessMemory, getVmMemory, getVmPeakMemory,
+               bytesToKB, bytesToMB, bytesToGB)
 
   ERROR HIGHLIGHTING (DIAGNOSTICS):
   ----------------------------------
@@ -72,6 +87,12 @@ FEATURES — IMPLEMENTED
   [x] Invalid escape sequences (\q, \y flagged — valid: \n \t \\ \" \r \0)
   [x] Empty conditions in if() / while()
   [x] #mode directive validation (red error for invalid/incomplete #mode)
+  [x] #autoFree directive validation (must be true or false)
+  [x] #allowMemoryLeaks directive validation (must be true or false)
+  [x] #allowMemoryLeaks true without #autoFree false → error
+  [x] Directive ordering violation (#allowMemoryLeaks before #autoFree) → error
+  [x] Directives declared after code → error
+  [x] Duplicate directive declarations → error
   [x] Type mismatch on function calls (param type vs arg type)
   [x] Function arity checking (wrong number of arguments)
   [x] Type mismatch on variable assignment (int x = "hello")
@@ -84,6 +105,9 @@ FEATURES — IMPLEMENTED
   [x] Dead code after return (unreachable code, warning)
   [x] Division by zero on literal divisors (x / 0)
   [x] Missing return in non-void function (warning)
+  [x] Missing return type in #mode static (error)
+  [x] void function returning a value (error)
+  [x] void function used in expression (error)
   [x] Unused typed variables (declared but never used, warning)
   [x] Shadowing built-in function names (warning)
   [x] Empty block body (warning for if/while/for/try/catch)
@@ -94,13 +118,14 @@ FEATURES — IMPLEMENTED
   [x] Hover over built-in functions → shows signature + description
   [x] Hover over keywords → shows one-line usage + description
   [x] Hover over types → shows type info + example
+  [x] Hover over directives (#mode, #autoFree, #allowMemoryLeaks) → shows options
   [x] Rich markdown tooltips with code blocks
 
   COMMANDS (Ctrl+Shift+P):
   -------------------------
-  [x] "Tantrums: Run File"        → tantrums run <file.42AHH>
-  [x] "Tantrums: Compile File"    → tantrums compile <file.42AHH>
-  [x] "Tantrums: Execute Bytecode"→ tantrums exec <file.42ass>
+  [x] "Tantrums: Run File"         → tantrums run <file.42AHH>
+  [x] "Tantrums: Compile File"     → tantrums compile <file.42AHH>
+  [x] "Tantrums: Execute Bytecode" → tantrums exec <file.42ass>
   [x] Output in dedicated "Tantrums" terminal
   [x] Run button in editor title bar (▶)
   [x] Right-click context menu (Run / Compile)
@@ -136,17 +161,19 @@ FEATURES — IMPLEMENTED
 FEATURES — TBD (Future)
 ================================================================================
 
-  [ ] Go to definition      (Ctrl+Click on function name)
-  [ ] Find all references   (Shift+F12)
-  [ ] Rename symbol         (F2)
-  [ ] Debugger integration  (breakpoints, step through)
-  [ ] Outline view          (functions/variables in side panel)
+  [ ] Go to definition       (Ctrl+Click on function name)
+  [ ] Find all references    (Shift+F12)
+  [ ] Rename symbol          (F2)
+  [ ] Debugger integration   (breakpoints, step through)
+  [ ] Outline view           (functions/variables in side panel)
   [ ] Semantic highlighting  (context-aware coloring)
   [ ] Cross-file IntelliSense (autocomplete from imported files)
   [ ] Error squiggles from actual compiler output
   [ ] Formatting / auto-format (Shift+Alt+F)
-  [ ] .vsix packaging       (installable from marketplace)
+  [ ] .vsix packaging        (installable from marketplace)
   [ ] Workspace settings     (tantrums.compilerPath, etc.)
+  [ ] Pointer escape warning  (highlight potentially leaked pointers)
+  [ ] #autoFree mode indicator in status bar
 
 
 ================================================================================
@@ -161,10 +188,26 @@ FILE STRUCTURE
   ├── syntaxes/
   │   └── tantrums.tmLanguage.json  TextMate grammar (syntax highlighting)
   ├── snippets/
-  │   └── tantrums.json             Code snippets (30+)
+  │   └── tantrums.json             Code snippets (40+)
   └── icons/
       ├── tantrums-source.png       .42AHH file icon
       └── tantrums-bytecode.png     .42ass file icon
+
+
+================================================================================
+DIRECTIVE SNIPPETS REFERENCE
+================================================================================
+
+  Type "mode" → inserts #mode directive with picker
+  Type "autofree" → inserts #autoFree directive
+  Type "leaks" → inserts #allowMemoryLeaks directive
+  Type "manualheader" → inserts full manual memory file header:
+    #autoFree false;
+  Type "arenaheader" → inserts full arena file header:
+    #autoFree false;
+    #allowMemoryLeaks true;
+  Type "staticheader" → inserts full strict file header:
+    #mode static;
 
 
 ================================================================================

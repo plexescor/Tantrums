@@ -699,8 +699,76 @@ ASTNode* parser_parse(TokenList* tokens) {
     ASTNode* program = ast_new(NODE_PROGRAM, 1);
     nodelist_init(&program->as.program);
 
+    bool seen_code = false;
+    bool seen_autofree = false;
+    bool seen_allow_leaks = false;
+    bool current_autofree_val = true;
+
     while (!is_at_end(&p)) {
-        nodelist_add(&program->as.program, declaration(&p));
+        if (check(&p, TOKEN_AUTOFREE_KW)) {
+            Token* tok = advance_tok(&p);
+            if (seen_code) {
+                fprintf(stderr, "[Line %d] Error: #autoFree directive must appear before any code.\n", tok->line);
+                p.had_error = true;
+            } else if (seen_allow_leaks) {
+                fprintf(stderr, "[Line %d] Error: #autoFree must be declared before #allowMemoryLeaks.\n", tok->line);
+                p.had_error = true;
+            } else if (seen_autofree) {
+                fprintf(stderr, "[Line %d] Error: #autoFree directive already declared.\n", tok->line);
+                p.had_error = true;
+            }
+            seen_autofree = true;
+            
+            bool enabled = true;
+            if (match(&p, TOKEN_TRUE)) {
+                enabled = true;
+            } else if (match(&p, TOKEN_FALSE)) {
+                enabled = false;
+            } else {
+                fprintf(stderr, "[Line %d] Error: #autoFree value must be 'true' or 'false'.\n", tok->line);
+                p.had_error = true;
+                if (!is_at_end(&p) && !check(&p, TOKEN_SEMICOLON)) advance_tok(&p); // Skip bad token
+            }
+            consume(&p, TOKEN_SEMICOLON, "Expected ';' after #autoFree directive.");
+            current_autofree_val = enabled;
+            
+            ASTNode* autofree_node = ast_new(NODE_AUTOFREE, tok->line);
+            autofree_node->as.autofree.enabled = enabled;
+            nodelist_add(&program->as.program, autofree_node);
+        } else if (check(&p, TOKEN_ALLOW_LEAKS_KW)) {
+            Token* tok = advance_tok(&p);
+            if (seen_code) {
+                fprintf(stderr, "[Line %d] Error: #allowMemoryLeaks directive must appear before any code.\n", tok->line);
+                p.had_error = true;
+            } else if (seen_allow_leaks) {
+                fprintf(stderr, "[Line %d] Error: #allowMemoryLeaks directive already declared.\n", tok->line);
+                p.had_error = true;
+            }
+            seen_allow_leaks = true;
+            
+            bool enabled = false;
+            if (match(&p, TOKEN_TRUE)) {
+                enabled = true;
+                if (current_autofree_val) {
+                    fprintf(stderr, "[Line %d] Error: #allowMemoryLeaks true requires #autoFree false to be declared first. auto-free and allowed leaks are contradictory.\n", tok->line);
+                    p.had_error = true;
+                }
+            } else if (match(&p, TOKEN_FALSE)) {
+                enabled = false;
+            } else {
+                fprintf(stderr, "[Line %d] Error: #allowMemoryLeaks value must be 'true' or 'false'.\n", tok->line);
+                p.had_error = true;
+                if (!is_at_end(&p) && !check(&p, TOKEN_SEMICOLON)) advance_tok(&p); // Skip bad token
+            }
+            consume(&p, TOKEN_SEMICOLON, "Expected ';' after #allowMemoryLeaks directive.");
+            
+            ASTNode* allow_leaks_node = ast_new(NODE_ALLOW_LEAKS, tok->line);
+            allow_leaks_node->as.allow_leaks.enabled = enabled;
+            nodelist_add(&program->as.program, allow_leaks_node);
+        } else {
+            seen_code = true;
+            nodelist_add(&program->as.program, declaration(&p));
+        }
         if (p.had_error) break;
     }
     return program;

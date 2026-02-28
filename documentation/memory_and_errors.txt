@@ -1,122 +1,676 @@
 ================================================================================
-                      MEMORY & ERRORS IN TANTRUMS
+                       MEMORY & ERRORS IN TANTRUMS
 ================================================================================
 
-BASIC INFO: A TALE OF TWO MEMORY MANAGERS
---------------------------------------------------------------------------------
-Memory management in Tantrums is completely dual-mode. It was designed to cater 
-to both Python developers who are terrified of Segfaults, and hardcore C coders 
-who demand total control over the heap allocator.
+  Memory management is the part of programming that separates the people who
+  write code from the people who really understand what's happening. In C, one
+  wrong pointer and your program silently corrupts memory somewhere completely
+  unrelated to the bug, which then crashes 30 seconds later in a completely
+  different function, and you spend 8 hours with a debugger figuring out what
+  happened.
 
-1. AUTOMATIC MEMORY (DEFAULT)
-By default, you have completely automatic memory management via Reference 
-Counting and a Cycle Collector.
-When you write `items = [1, 2, 3];`, Tantrums dynamically allocates memory on 
-the heap for the list structure. When the `items` variable goes out of scope 
-(like when the function returns), the reference count drops to 0, and the VM 
-automatically sweeps the memory clean. You never have to think about `malloc` 
-or `free`. 
+  Tantrums takes a different approach. Memory bugs should be caught immediately,
+  with clear error messages, at the exact location they occur. If you free
+  something twice, you should know. If you dereference a freed pointer, you
+  should know. If you forget to free something, you should know.
 
-2. MANUAL MEMORY (OPT-IN)
-If you inherently distrust the garbage collector, you can opt-in to manual memory 
-management using the `alloc` and `free` keywords. 
+  And crucially, you should be able to choose how much of this the language does
+  for you automatically, and how much you want to control yourself.
 
-x = alloc int(42);
-print(*x);
-free x;
-
-In this mode, Tantrums trusts you completely. If you forget to `free x;`, that 
-memory belongs to the void indefinitely.
-
-ADVANCED INFO: SAFE POINTERS
---------------------------------------------------------------------------------
-Because we cater to manual memory management, we had to implement pointers. 
-You can use the address-of operator (`&`) to get the memory address of a value, 
-and the dereference operator (`*`) to retrieve the value.
-
-p = &x;
-print(*p);
-*p = 20;
-
-However, we did not want the pure, unfiltered terror of C pointers. In C, a 
-rogue pointer will overwrite another application's memory or cause a colossal 
-Segmentation Fault that crashes the entire host process without leaving a trace.
-
-In Tantrums, pointers are bounds-checked and type-safe.
-If you try to dereference a null pointer (`*p` when `p` is null), the Tantrums 
-VM detects it. Instead of crashing, it catches the error internally, halts 
-execution safely, and prints a beautiful "Null Pointer Dereference Failed" error 
-message to the terminal.
-
-Furthermore, pointer arithmetic is aggressively banned. You cannot write `p + 5` 
-to jump forward 5 memory addresses to see what is living on the heap. We refuse 
-to let you hack the internal state of the VM.
-
-ADVANCED INFO: ERROR HANDLING AND EXCEPTIONS
---------------------------------------------------------------------------------
-Writing perfect code is impossible. When things inevitably break, Tantrums 
-provides a robust exception handling model using strings.
-
-You can halt execution and raise a manual panic state using the `throw` keyword:
-
-throw "Something went wrong! I tried dividing by zero!";
-
-When a `throw` statement executes, the VM unwinds the call stack searching for 
-a `catch` block. If it doesn't find one, the VM prints your string and exits.
-
-To intercept a thrown error, you wrap risky operations in `try / catch` blocks:
-
-try 
-{
-    // risky code
-    throw "Oops, a bug!";
-} 
-catch (e) 
-{
-    print("Caught error: " + e);
-}
-
-The variable `e` catches the string that was thrown. What if you literally do 
-not care what the error was? Tantrums lets you completely drop the error 
-variable. This allows you to aggressively suppress all runtime failures:
-
-try { throw "fail"; } catch { print("We failed. Moving on anyway."); }
-
-This is affectionately known as the "Burying Your Head in the Sand" pattern.
-
-LAUGHS & FACTS: THE CHAOS OF VM PANICS
---------------------------------------------------------------------------------
-- Why do we `throw` strings instead of sophisticated `Exception` objects like 
-  Java or Python? Because instantiating `Exception` instances deep in the C++ 
-  AST interpreter was annoying, and serializing exceptions down the call stack 
-  was too complex to implement in the bytecode runner. So the developers just 
-  said, "Screw it, let's just throw raw strings." It works surprisingly well!
-
-- The Cycle Collector was not originally planned. Early in development, the VM 
-  used simple reference counting. But if you created a list that contained a 
-  reference to itself (`list A = [A]`), the reference count would never hit 0, 
-  and the memory would leak infinitely. Our test script generated a self-
-  referencing map inside a `while (true)` loop and instantly consumed 32GB (16GB system + 16GB page file) of 
-  system RAM, forcing a hard system reboot. The Cycle Collector was patched in 
-  shortly after.
-
-- If you divide an integer by zero as a raw literal (`x / 0`), the semantic 
-  analyzer catches it and throws a compile-time error! But if you divide by a 
-  variable that evaluates to zero at runtime (`y = 0; x / y`), the VM catches 
-  the division, suppresses the C++ `Floating point exception (core dumped)` OS 
-  level crash, and correctly unwinds the Tantrums stack.
-
-- If you accidentally `free` the same variable twice (double free), the VM 
-  won't crash the host OS. It intercepts the double free check using an inner 
-  tracker map, points out your mistake via a console error, and shuts down 
-  the script. Safe pointers!
-
-- The `catch` block mechanism uses a stack of `TryCatchRecord` constructs inside 
-  the VM context. When an error is thrown, the VM instruction pointer (`IP`) 
-  literally teleports back to the `catch` block offset recorded during the `try` 
-  setup. It's essentially a glorified `goto` statement pretending to be an 
-  elegant control flow architecture.
+  This document covers:
+  • The three memory directives and what they unlock
+  • The seven-layer memory safety stack
+  • Escape analysis in detail — how the compiler decides what to auto-free
+  • Pointer usage — what works and what doesn't
+  • The exit leak detector
+  • Error handling with throw and try/catch
+  • Real things that went catastrophically wrong during development
 
 ================================================================================
-END OF MEMORY & ERRORS. MAY YOU NEVER SEGFAULT IN TANTRUMS.
+  BASIC INFO: THE THREE MEMORY DIRECTIVES
+================================================================================
+
+  Tantrums has three file-level directives that control memory behavior.
+  They must appear at the top of the file before any code, in this order:
+
+  #mode (if used) → #autoFree → #allowMemoryLeaks
+
+  ── DIRECTIVE 1: #autoFree ────────────────────────────────────────────────────
+
+  #autoFree true;     // DEFAULT — automatic memory management enabled
+  #autoFree false;    // full manual control
+
+  With #autoFree true (or no directive — this is the default), the language
+  manages pointer memory for you using a two-layer system:
+
+  Layer A — Compile time:
+  The compiler analyzes every alloc'd pointer after parsing the full function.
+  If a pointer is provably local (never returned, never passed to functions,
+  never aliased, never put in a container, never used in complex expressions),
+  the compiler inserts a free() instruction in the bytecode automatically at
+  the end of the pointer's scope. It also prints a note:
+
+  [Tantrums] note: auto-freed 'p' at line 3 (provably local)
+
+  You can suppress these notes with --no-autofree-notes if they clutter
+  your output.
+
+  Layer B — Runtime:
+  If the compiler's escape analysis couldn't prove a pointer was safe to
+  auto-free (because it appeared in a conditional branch, for example), the
+  runtime takes over. When any scope exits, the VM checks if any pointers
+  declared in that scope are still live and haven't escaped. If so, it auto-frees
+  them and logs it:
+
+  [Tantrums Runtime] auto-freed 'p' at scope exit (line 7)
+
+  With #autoFree false, BOTH layers are disabled. The compiler doesn't insert
+  any automatic frees. The runtime doesn't check for live pointers at scope exit.
+  You are completely responsible for every alloc and free.
+
+  Important: #autoFree false disables automatic freeing, but does NOT disable
+  safety checks. Use-after-free, double-free, and null dereference detection
+  are ALWAYS active regardless of any directive.
+
+  Also important: The reassignment-without-free error is ALWAYS active:
+  int* p = alloc int(42);
+  p = alloc int(99);    // COMPILE ERROR regardless of #autoFree setting
+
+  This error is never disabled because it is unambiguously always a leak.
+  There is no scenario where reassigning a pointer variable without freeing
+  the previous allocation is intentional or correct.
+
+  ── DIRECTIVE 2: #allowMemoryLeaks ────────────────────────────────────────────
+
+  #allowMemoryLeaks false;    // DEFAULT — leaks abort compilation
+  #allowMemoryLeaks true;     // leaks produce warnings, not errors
+
+  IMPORTANT: #allowMemoryLeaks true requires #autoFree false to be declared first.
+
+  #allowMemoryLeaks true;                     // COMPILE ERROR
+  #autoFree true; #allowMemoryLeaks true;     // COMPILE ERROR
+
+  #autoFree false; #allowMemoryLeaks true;    // VALID
+
+  Why does it require #autoFree false? Because if auto-free is enabled, the
+  system is actively preventing leaks. Saying "allow leaks" while also saying
+  "auto-free everything" is contradictory. You can't simultaneously be cleaning
+  up memory automatically and allowing it to leak.
+
+  With #allowMemoryLeaks true, compile-time leak errors become warnings:
+
+  Instead of:
+  [Line 3] Type Error: Memory leak detected. Pointer 'p' goes out of scope
+  without being freed.
+  Compilation aborted due to type errors.
+
+  You get:
+  [Line 3] Warning: Potential memory leak. Pointer 'p' goes out of scope
+  without being freed. (#allowMemoryLeaks true)
+
+  And compilation continues. The program runs. Pointer p leaks.
+
+  Why would you want this? The arena/region allocation pattern. Some programs
+  allocate many objects, use them, and then let the operating system reclaim
+  all memory when the process exits. Parsers, compilers, CLI tools that process
+  input and exit — these often use this pattern because the OS cleanup on exit
+  is free and instantaneous. The overhead of freeing each individual allocation
+  is actually slower than just letting the process terminate.
+
+  Even with #allowMemoryLeaks true:
+  • The exit leak detector still runs and reports what leaked
+  • Runtime use-after-free detection is still active
+  • Runtime double-free detection is still active
+  • Runtime null dereference detection is still active
+
+  ── THE FOUR MEMORY PERSONALITIES ────────────────────────────────────────────
+
+  Combining these directives gives you four distinct memory philosophies:
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ #autoFree true  (default) + #allowMemoryLeaks false (default)            │
+  │                                                                           │
+  │ "Safe and automatic"                                                      │
+  │ The compiler and runtime manage your pointers. Leaks abort compilation.  │
+  │ Best for: general purpose code, beginners, anything where safety matters  │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ #autoFree false + #allowMemoryLeaks false                                 │
+  │                                                                           │
+  │ "C-style manual memory"                                                   │
+  │ You control everything. Leaks still abort compilation.                    │
+  │ The compiler tells you when you forgot to free. You fix it.               │
+  │ Best for: systems programming, performance-critical allocation,            │
+  │           developers who know what they're doing                          │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ #autoFree false + #allowMemoryLeaks true                                  │
+  │                                                                           │
+  │ "Arena/region allocation"                                                 │
+  │ Full manual control. Leaks are intentional and allowed.                   │
+  │ Leak report runs on exit so you know exactly what leaked.                 │
+  │ Best for: parsers, compilers, CLI tools, batch processing programs        │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────────────────────┐
+  │ #autoFree true + #allowMemoryLeaks true                                   │
+  │                                                                           │
+  │ ❌ INVALID — Contradictory. Compile error.                                │
+  └──────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+  BASIC INFO: WORKING WITH POINTERS
+================================================================================
+
+  Manual memory in Tantrums uses three keywords: alloc, free, and the
+  dereference operator *.
+
+  ── CREATING A POINTER ────────────────────────────────────────────────────────
+
+  int* p = alloc int(42);
+
+  This allocates an integer on the heap with the initial value 42, and stores
+  the pointer to it in p. The type annotation (int*) tells both you and the
+  compiler that p is a pointer to an integer.
+
+  The only way to create a pointer in Tantrums is via the alloc keyword.
+  There is no address-of operator (&x). This is intentional — variables in
+  Tantrums live in VM stack slots that don't have stable heap addresses.
+  If &x existed, it would point to memory that could move or vanish when the
+  function returns.
+
+  ── READING AND WRITING THROUGH A POINTER ─────────────────────────────────────
+
+  print(*p);    // dereference to READ: prints 42
+  *p = 99;      // dereference to WRITE: the value at p's address is now 99
+  print(*p);    // now prints 99
+
+  ── FREEING A POINTER ────────────────────────────────────────────────────────
+
+  free p;
+
+  This releases the memory that p points to and sets p to null. Any future
+  dereference of p after this point will be caught immediately:
+
+  free p;
+  print(*p);    // [Tantrums Runtime Error] Null pointer dereference!
+                // (line number included)
+
+  ── ALIASING ─────────────────────────────────────────────────────────────────
+
+  q = p;
+
+  This makes q point to the same memory location as p. Now both q and p
+  refer to the same value. Modifying through one affects what you read through
+  the other.
+
+  int* p = alloc int(42);
+  q = p;
+  *q = 99;
+  print(*p);    // 99 — the same memory was modified through q
+
+  If you free p, q becomes a dangling reference. The compiler's escape analysis
+  knows about aliasing (q = p counts as an escape condition for p) and will not
+  auto-free p or emit a leak error when this pattern exists.
+
+  ── PASSING POINTERS TO FUNCTIONS ─────────────────────────────────────────────
+
+  tantrum void process(int* ptr)
+  {
+      *ptr = *ptr * 2;    // double the value at the pointer's address
+  }
+
+  tantrum main()
+  {
+      int* p = alloc int(21);
+      process(p);
+      print(*p);    // 42
+      free p;
+  }
+
+  Passing a pointer to a function is an escape condition. The compiler will
+  not auto-free p after process(p) and will not emit a leak error.
+
+  ── RETURNING POINTERS FROM FUNCTIONS ────────────────────────────────────────
+
+  tantrum int* makeValue(int n)
+  {
+      int* p = alloc int(n);
+      return (p);
+  }
+
+  tantrum main()
+  {
+      int* v = makeValue(42);
+      print(*v);    // 42
+      free v;       // caller is responsible for freeing
+  }
+
+  The function's return type must be declared as int* for this to work.
+  Returning a pointer is the ultimate escape condition — the compiler will never
+  auto-free or leak-error any pointer that appears in a return statement.
+
+  ── WHAT YOU CANNOT DO WITH POINTERS ─────────────────────────────────────────
+
+  int* p = &x;         // ❌ address-of doesn't exist
+  p = p + 1;           // ❌ pointer arithmetic doesn't exist
+  int* q = (int*)p;    // ❌ type casting doesn't exist
+  p++;                 // ❌ pointer increment doesn't exist
+
+  These restrictions are intentional. Pointer arithmetic is the primary source
+  of memory corruption bugs in C programs. By not allowing it, Tantrums
+  eliminates an entire class of bugs that are notoriously hard to debug.
+
+================================================================================
+  ADVANCED INFO: ESCAPE ANALYSIS IN DEPTH
+================================================================================
+
+  When #autoFree true is active, the compiler runs escape analysis on every
+  alloc'd pointer in every function. Escape analysis answers one question:
+  "Does this pointer escape this function's scope, or does it stay local?"
+
+  If it escapes — some other piece of code takes ownership of it. The compiler
+  must not free it or emit a leak error. Trust the developer.
+  If it stays local — the compiler is safe to auto-free it at end of scope.
+
+  ── THE ESCAPE CONDITIONS ────────────────────────────────────────────────────
+
+  The compiler considers a pointer escaped if ANY of these are true:
+
+  1. Pointer appears in a return statement anywhere in the function
+     return (p);                → escaped. caller owns it. no auto-free.
+
+  2. Pointer passed as argument to any function call
+     process(p);               → escaped. callee might store it. no auto-free.
+     print(*p);                → NOT escaped. passing *p (the value), not p.
+
+  3. Pointer passed to append()
+     append(myList, p);        → escaped. list now holds it. no auto-free.
+
+  4. Pointer assigned to another variable (alias)
+     q = p;                    → escaped. q might outlive this scope. no auto-free.
+
+  5. Pointer stored in a map
+     myMap["key"] = p;         → escaped. map holds it. no auto-free.
+
+  6. Pointer assigned to a global variable
+     globalPtr = p;            → escaped. global outlives this scope. no auto-free.
+
+  7. Pointer appears anywhere inside a conditional branch
+     if (cond) { free p; }     → ambiguous. compiler can't prove what happens.
+                                  no auto-free. runtime handles it.
+
+  8. Pointer used in complex expressions beyond simple *p reads or writes
+     x = *p + someVar;         → complex use. when in doubt, skip. no auto-free.
+
+  9. Pointer appears in any operator expression that could store it
+     result = p;               → might be storage. no auto-free.
+
+  10. Pointer used in more than one distinct way after declaration
+      *p = 10;
+      *p = 20;                 → multiple uses suggest complex lifetime.
+                                  no auto-free.
+
+  ── THE CONSERVATIVE RULE — THE MOST IMPORTANT RULE ─────────────────────────
+
+  WHEN IN DOUBT → DO NOTHING.
+
+  This is the most important rule in all of escape analysis. If the compiler
+  is uncertain whether a pointer escapes, it assumes it does and skips
+  auto-free entirely. The runtime will handle it if needed. The leak detector
+  will report it if it's truly leaked.
+
+  False negative (missed auto-free): acceptable.
+  The runtime catches it. The leak detector reports it. No harm done.
+
+  False positive (auto-free on a pointer that actually escaped): catastrophic.
+  The pointer gets freed while something else still holds a reference to it.
+  Every subsequent access through that reference is use-after-free.
+  This is worse than not freeing at all.
+
+  Wrong auto-free is worse than no auto-free. The compiler always errs on the
+  side of doing less.
+
+  ── THE PRIORITY ORDER ───────────────────────────────────────────────────────
+
+  For each alloc'd pointer, the compiler follows this priority:
+
+  PRIORITY 1 — Escape detected (any of the 10 conditions)
+  Do nothing. Skip all analysis. Trust the developer.
+
+  PRIORITY 2 — Manual free exists
+  Developer called free p; explicitly. Do nothing. It's handled.
+
+  PRIORITY 3 — Provably local (no escape, no manual free, single simple use)
+  Safe to auto-free. Insert free(p) in bytecode at end of scope.
+  Emit note: [Tantrums] note: auto-freed 'p' at line X (provably local)
+
+  PRIORITY 4 — Ambiguous (doesn't clearly fit any other category)
+  Do nothing. Runtime handles it.
+
+================================================================================
+  ADVANCED INFO: THE SEVEN-LAYER MEMORY SAFETY STACK
+================================================================================
+
+  Tantrums has seven distinct layers of memory safety, each catching different
+  classes of bugs.
+
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │ LAYER 1: Compile-time escape analysis                                      │
+  │ Runs after full parsing. Identifies pointers that genuinely escape.        │
+  │ Prevents false positive leak errors on valid code.                         │
+  │ Zero false positives by design — conservative rule guarantees this.        │
+  └────────────────────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │ LAYER 2: Compile-time auto-free                                            │
+  │ Inserts free() opcodes for provably local pointers.                        │
+  │ Eliminates the most common case of accidental leaks automatically.         │
+  │ Emits a note so you know it happened.                                      │
+  └────────────────────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │ LAYER 3: Runtime auto-free                                                 │
+  │ At scope exit, the VM checks for live pointers declared in that scope.     │
+  │ If any are still live and haven't escaped, they're freed automatically.    │
+  │ Catches what compile-time analysis was too conservative to handle.         │
+  └────────────────────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │ LAYER 4: Runtime use-after-free detection                                  │
+  │ When a pointer is freed, it's set to null in the pointer registry.         │
+  │ Any subsequent dereference checks against null first.                      │
+  │ Error: [Tantrums Runtime Error] Null pointer dereference! Line X           │
+  └────────────────────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │ LAYER 5: Runtime double-free detection                                     │
+  │ Freeing a null pointer (already freed) is detected immediately.            │
+  │ Error: [Tantrums Runtime Error] Null pointer dereference! Line X           │
+  └────────────────────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │ LAYER 6: Runtime null dereference detection                                │
+  │ Any dereference of a null pointer is caught before it accesses memory.     │
+  │ Error: [Tantrums Runtime Error] Null pointer dereference! Line X           │
+  └────────────────────────────────────────────────────────────────────────────┘
+  ┌────────────────────────────────────────────────────────────────────────────┐
+  │ LAYER 7: Exit leak detector                                                │
+  │ On program exit, all remaining live pointers are reported as leaks.        │
+  │ Reports include line numbers, function names, types, sizes, totals.        │
+  │ Large leak counts redirect to memleaklog.txt.                              │
+  └────────────────────────────────────────────────────────────────────────────┘
+
+  Layers 4, 5, and 6 are ALWAYS active regardless of any directive.
+  You cannot disable use-after-free, double-free, or null dereference detection.
+  Memory corruption is never intentional and there is no use case for allowing it.
+
+================================================================================
+  ADVANCED INFO: THE EXIT LEAK DETECTOR
+================================================================================
+
+  When your program finishes (main() returns), before the VM shuts down, it
+  runs the leak detector. This scans the live pointer registry for any pointers
+  that were allocated but never freed, never auto-freed, and not categorized
+  as intentionally leaked via #allowMemoryLeaks.
+
+  ── SMALL LEAK REPORTS (≤5 leaks) ────────────────────────────────────────────
+
+  Printed directly to the console:
+
+  [Tantrums Warning] Memory leak detected: 3 allocation(s) not freed
+    alloc at line 4 in main — int (96 bytes)
+    alloc at line 7 in makeValue — int (96 bytes)
+    alloc at line 12 in main — int (96 bytes)
+  Total Leaked Memory: 288 bytes = 0.28 KB
+
+  ── LARGE LEAK REPORTS (>5 leaks) ────────────────────────────────────────────
+
+  A brief notice goes to the console:
+  [Tantrums Warning] Memory leak detected: 1000 allocation(s) not freed.
+  See memleaklog.txt in the same directory as the executing bytecode.
+
+  The full report goes to memleaklog.txt in the same folder as your .42ass file:
+
+  TANTRUMS MEMORY LEAK REPORT
+  ============================
+  Executable: main.42ass
+  Leaks: 1000 allocations
+  ============================
+    alloc at line 8 in main — int (96 bytes) [x1000]
+  ============================
+  SUMMARY
+    Total leaked: 96,000 bytes
+               = 93.75 KB
+               = 0.09 MB
+               = 0.00 GB
+  ============================
+
+  The [x1000] notation is deduplication. If the same line allocated a pointer
+  many times (like inside a loop), they're grouped rather than listing the same
+  line 1000 times. This makes the report readable even when you've leaked
+  millions of allocations (which has been tested — it works up to 20 million).
+
+  ── WITH #allowMemoryLeaks true ──────────────────────────────────────────────
+
+  The leak report still runs but the header includes a note:
+
+  TANTRUMS MEMORY LEAK REPORT
+  ============================
+  Note: #allowMemoryLeaks true — leaks permitted by developer.
+  Executable: main.42ass
+  ...
+
+  This makes it clear the leaks were intentional, not a bug in the language.
+
+================================================================================
+  BASIC INFO: ERROR HANDLING WITH THROW AND TRY/CATCH
+================================================================================
+
+  Runtime errors in Tantrums use string-based exceptions. Instead of Java-style
+  Exception objects with stack traces and inheritance hierarchies, Tantrums
+  throws raw strings. It's simple, it's readable, and it works.
+
+  ── THROWING AN ERROR ────────────────────────────────────────────────────────
+
+  throw "Something went catastrophically wrong!";
+
+  When throw executes, the VM immediately halts execution of the current function
+  and unwinds the call stack looking for a try/catch block. If it finds one,
+  execution jumps to the catch block. If it doesn't find one, the error string
+  is printed to the console and the program exits.
+
+  ── CATCHING AN ERROR ────────────────────────────────────────────────────────
+
+  try
+  {
+      // code that might throw
+      throw "oops";
+  }
+  catch (e)
+  {
+      print("Caught: " + e);    // e is the thrown string
+  }
+
+  ── CATCHING WITHOUT A VARIABLE ──────────────────────────────────────────────
+
+  If you don't need to know what the error was, drop the variable:
+
+  try
+  {
+      throw "doesn't matter";
+  }
+  catch
+  {
+      print("Something went wrong. Moving on.");
+  }
+
+  This is affectionately called the "head in the sand" pattern. Sometimes you
+  just want to attempt something and continue regardless of whether it worked.
+  Tantrums explicitly supports this. No judgment.
+
+  ── NESTED TRY/CATCH AND RETHROW ─────────────────────────────────────────────
+
+  try
+  {
+      try
+      {
+          throw "inner error";
+      }
+      catch (e)
+      {
+          print("Inner caught: " + e);
+          throw "re-thrown as outer error";    // rethrow
+      }
+  }
+  catch (e)
+  {
+      print("Outer caught: " + e);
+  }
+
+  Nesting works to arbitrary depth. Rethrowing (throwing inside a catch block)
+  propagates the error to the next outer try/catch.
+
+  ── PRACTICAL ERROR HANDLING PATTERNS ────────────────────────────────────────
+
+  Validating input:
+  tantrum int parsePositive(int n)
+  {
+      if (n <= 0)
+      {
+          throw "Expected positive integer, got: " + n;
+      }
+      return (n);
+  }
+
+  tantrum main()
+  {
+      try
+      {
+          int x = parsePositive(-5);
+          print(x);
+      }
+      catch (e)
+      {
+          print("Error: " + e);
+      }
+  }
+
+================================================================================
+  LAUGHS & FACTS: MEMORY DISASTERS AND LESSONS LEARNED
+================================================================================
+
+  ☠️ THE 32GB RAM INCIDENT
+  During development, a test script created a self-referencing map — a map that
+  contained a reference to itself. Inside a while(true) loop. The reference
+  counting GC (which was the memory system at the time) never saw the reference
+  count hit zero because the map always held a reference to itself.
+
+  Every iteration created a new self-referencing map that could never be freed.
+  The script consumed all 16GB of physical RAM, then the OS started paging to
+  disk, eventually consuming the entire 16GB page file as well. Total: 32GB.
+  The machine required a hard reboot.
+
+  The reference cycle collector was implemented immediately afterward.
+
+  ☠️ THE ORIGINAL "GC" THAT WAS NOTHING
+  The first version of the garbage collector was a function with this body:
+  void collectGarbage() {
+      // TODO: implement
+  }
+
+  Memory leaks were categorized as "deferred cleanup" in the internal docs.
+  This lasted two test runs before scripts started consuming all available RAM.
+  In hindsight, the name was accurate: it did collect garbage, just very slowly,
+  by waiting for the OS to reclaim everything when the process was killed.
+
+  ☠️ WHY STRINGS ARE NOT EXCEPTIONS
+  Java throws Exception objects. Python throws Exception instances with stack
+  traces and inheritance hierarchies. Why does Tantrums throw strings?
+
+  Because implementing proper Exception objects in the bytecode VM requires
+  the VM to be able to construct, store, and pass these objects through the
+  exception unwind mechanism. Each Exception would need to be a heap-allocated
+  object, reference-counted, with fields for the message, the line number, the
+  call stack at throw time, etc.
+
+  Building and serializing this through the existing VM was significantly more
+  complex than just... throwing a string. And honestly, for most error handling
+  purposes, knowing what the error message says is all you need. We're not
+  doing Java-style exception hierarchies with 17 subclasses of IOException.
+  We're throwing a descriptive string and catching it. It works.
+
+  ☠️ THE CATCH IS LITERALLY A GOTO
+  The try/catch mechanism in the VM works by maintaining a stack of TryCatchRecord
+  structs. Each struct contains the bytecode offset of the corresponding catch
+  block. When throw executes, the VM pops the call stack looking for the nearest
+  TryCatchRecord. When it finds one, it sets the Instruction Pointer (IP) to the
+  catch block offset from the record.
+
+  That IP assignment is literally equivalent to a goto statement in the C source
+  code of the VM. try/catch is a well-structured, semantically meaningful goto.
+  Every exception mechanism in every language is, at some level, a goto. We
+  just didn't bother hiding it behind a more sophisticated mechanism.
+
+  ☠️ THE DOUBLE FREE THAT DIDN'T CRASH
+  In C, a double free (calling free() on the same pointer twice) is undefined
+  behavior. It can corrupt the heap allocator's internal metadata, causing
+  subsequent allocations to return overlapping memory regions, resulting in
+  memory corruption that manifests as completely unrelated crashes hours later.
+  It's one of the most dangerous bug classes in C programming.
+
+  In Tantrums, when you call free p, the pointer p is set to null in the
+  pointer registry immediately. The next time you call free p again, the runtime
+  checks: is p null? Yes. Emits a "Null pointer dereference" error. Program
+  halts cleanly. No heap corruption. No mysterious crashes 30 minutes later.
+  Just a clear error message at the exact line where it happened.
+
+  ☠️ THE DIVISION BY ZERO DUALITY
+  If you write `x / 0` as a literal in your source code, the semantic analyzer
+  catches it at compile time and refuses to compile:
+  [Line X] Error: Division by zero.
+
+  But if you write `y = 0; x / y`, the zero isn't known until runtime. The VM
+  intercepts the division, detects the zero divisor before performing the
+  operation, and throws a clean Tantrums error. Without this, the OS would
+  deliver a SIGFPE signal to the process (Floating Point Exception) and the
+  VM would crash with "Floating point exception (core dumped)" — a particularly
+  unhelpful error message that tells you nothing about your Tantrums code.
+
+  ☠️ THE 20 MILLION ALLOCATION STRESS TEST
+  The leak detector was stress-tested with a loop that allocated 20 million
+  pointers without freeing any of them. The results:
+  • Process memory used: 2.80 GB
+  • Leak detector reported: 1.67 GB of leaks
+  • The ratio is consistent across scales (1.67x overhead is expected —
+    it includes malloc block headers, VM tracking structures, etc.)
+  • The deduplication [x20000000] worked correctly
+  • The redirect to memleaklog.txt worked correctly
+  • The VM did not crash, hang, or produce incorrect numbers
+  • The entire execution was stable
+
+  A leak detector that works correctly at 20 million leaks is a leak detector
+  you can actually trust at 20 actual leaks.
+
+================================================================================
+  QUICK REFERENCE: MEMORY BEHAVIORS BY DIRECTIVE COMBINATION
+================================================================================
+
+  ┌──────────────────────────────┬───────────────┬───────────────┬────────────┐
+  │ Behavior                     │ autoFree true │ autoFree false│ autoFree  │
+  │                              │ leaks false   │ leaks false   │ false     │
+  │                              │ (DEFAULT)     │               │ leaks true│
+  ├──────────────────────────────┼───────────────┼───────────────┼────────────┤
+  │ Compile-time auto-free       │ ✅ enabled    │ ❌ disabled   │ ❌ disabled│
+  │ Runtime auto-free            │ ✅ enabled    │ ❌ disabled   │ ❌ disabled│
+  │ Compile error on scope exit  │ ✅ enabled    │ ✅ enabled    │ ⚠️ warning │
+  │ Compile error on reassign    │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
+  │ Compile error on early return│ ✅ enabled    │ ✅ enabled    │ ⚠️ warning │
+  │ Exit leak detector           │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
+  │ Use-after-free detection     │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
+  │ Double-free detection        │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
+  │ Null dereference detection   │ ✅ enabled    │ ✅ enabled    │ ✅ enabled │
+  └──────────────────────────────┴───────────────┴───────────────┴────────────┘
+
+================================================================================
+  END OF MEMORY & ERRORS.
+  MAY YOUR POINTERS ALWAYS BE VALID, YOUR FREES ALWAYS BE SINGLE,
+  AND YOUR LEAKS ALWAYS BE INTENTIONAL.
 ================================================================================

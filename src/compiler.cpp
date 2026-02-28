@@ -27,6 +27,9 @@ static bool had_type_error = false;
 static CompileMode compile_mode = MODE_BOTH;
 static bool is_in_expr_stmt = false; /* tracking if current expression is a top-level statement */
 extern bool suppress_autofree_notes;
+static bool compile_autofree_enabled = true;
+static bool compile_allow_leaks_enabled = false;
+extern bool global_allow_leaks;
 
 static void type_error(int line, const char* msg);
 
@@ -294,12 +297,16 @@ static void end_scope(int line) {
         bool is_hidden = (local->name[0] == '\0' || memcmp(local->name, "$", 1) == 0);
 
         if (local->holds_alloc && !is_hidden) {
-            char buf[512];
-            snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' goes out of scope without being freed.", local->name);
-            type_error(line, buf);
+            if (compile_allow_leaks_enabled) {
+                printf("[Line %d] Warning: Potential memory leak. Pointer '%s' goes out of scope without being freed. (#allowMemoryLeaks true)\n", line, local->name);
+            } else {
+                char buf[512];
+                snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' goes out of scope without being freed.", local->name);
+                type_error(line, buf);
+            }
         }
 
-        if (local->auto_free) {
+        if (local->auto_free && compile_autofree_enabled) {
             if (!suppress_autofree_notes) {
                 printf("[Tantrums] note: auto-freed '%s' at line %d (provably local)\n", local->name, line);
             }
@@ -500,6 +507,7 @@ static void compile_expr(ASTNode* node) {
         const char* type_name = node->as.alloc_expr.type_name ? node->as.alloc_expr.type_name : "dynamic";
         ObjString* type_str = obj_string_new(type_name, (int)strlen(type_name));
         emit_byte(node->line, make_constant(OBJ_VAL(type_str)));
+        emit_byte(node->line, compile_autofree_enabled ? 1 : 0);
         break;
     }
 
@@ -563,9 +571,13 @@ static void compile_expr(ASTNode* node) {
         
         if (slot != -1) {
             if (current->locals[slot].holds_alloc) {
-                char buf[512];
-                snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' reassigned without being freed.", node->as.assign.name);
-                type_error(node->line, buf);
+                if (compile_allow_leaks_enabled) {
+                    printf("[Line %d] Warning: Potential memory leak. Pointer '%s' reassigned without being freed. (#allowMemoryLeaks true)\n", node->line, node->as.assign.name);
+                } else {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' reassigned without being freed.", node->as.assign.name);
+                    type_error(node->line, buf);
+                }
             }
             if (node->as.assign.value && node->as.assign.value->type == NODE_ALLOC) {
                 current->locals[slot].holds_alloc = true;
@@ -1239,9 +1251,13 @@ static void compile_node(ASTNode* node) {
                         continue;
                     }
                 }
-                char buf[512];
-                snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' goes out of scope without being freed.", current->locals[i].name);
-                type_error(node->line, buf);
+                if (compile_allow_leaks_enabled) {
+                    printf("[Line %d] Warning: Potential memory leak. Pointer '%s' goes out of scope without being freed. (#allowMemoryLeaks true)\n", node->line, current->locals[i].name);
+                } else {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf), "Memory leak detected. Pointer '%s' goes out of scope without being freed.", current->locals[i].name);
+                    type_error(node->line, buf);
+                }
                 current->locals[i].holds_alloc = false;
             }
         }
@@ -1365,6 +1381,15 @@ static void compile_node(ASTNode* node) {
         /* Already resolved before compilation — skip */
         break;
 
+    case NODE_AUTOFREE:
+        compile_autofree_enabled = node->as.autofree.enabled;
+        break;
+
+    case NODE_ALLOW_LEAKS:
+        compile_allow_leaks_enabled = node->as.allow_leaks.enabled;
+        global_allow_leaks = compile_allow_leaks_enabled;
+        break;
+
     default:
         compile_expr(node);
         emit_byte(node->line, OP_POP);
@@ -1376,6 +1401,9 @@ ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
     had_type_error = false;
     compile_mode = mode;
     global_count = 0;
+    compile_autofree_enabled = true;
+    compile_allow_leaks_enabled = false;
+    global_allow_leaks = false;
 
     /* Pre-scan to collect function signatures for type checking */
     prescan_signatures(program);

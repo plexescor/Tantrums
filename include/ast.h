@@ -18,7 +18,7 @@ typedef enum {
     NODE_IF, NODE_WHILE, NODE_FOR_IN,
     NODE_FUNC_DECL, NODE_RETURN, NODE_THROW, NODE_FREE,
     NODE_USE, NODE_TRY_CATCH, NODE_BREAK, NODE_CONTINUE,
-    NODE_PROGRAM,
+    NODE_PROGRAM, NODE_AUTOFREE, NODE_ALLOW_LEAKS,
 } NodeType;
 
 typedef struct { char* name; char* type_name; } ParamDef;
@@ -55,6 +55,8 @@ struct ASTNode {
         char* use_file;                                                /* USE       */
         struct { ASTNode* try_body; ASTNode* catch_body; char* err_var; } try_catch; /* TRY_CATCH */
         NodeList program;                                             /* PROGRAM   */
+        struct { bool enabled; } autofree;                            /* AUTOFREE  */
+        struct { bool enabled; } allow_leaks;                         /* ALLOW_LEAKS */
     } as;
 };
 
