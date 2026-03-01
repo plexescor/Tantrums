@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Types & Modes — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Types & Modes</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Language</span>
+  <h1>Types & Modes</h1>
+  <p class="ph-desc">The six built-in types and three typing mode directives.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#types">Built-in Types</a></li>
+<li><a href="#modes">Typing Modes</a></li>
+<li><a href="#directives">Directive Order</a></li>
+</ol></div>
+
+<h2 id="types">Built-in Types</h2>
+<div class="tw"><table>
+<thead><tr><th>Keyword</th><th>Description</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td><code>int</code></td><td class="lb">Integer</td><td><code>int x = 42;</code></td></tr>
+<tr><td><code>float</code></td><td class="lb">Floating point</td><td><code>float f = 3.14;</code></td></tr>
+<tr><td><code>string</code></td><td class="lb">Text</td><td><code>string s = "hi";</code></td></tr>
+<tr><td><code>bool</code></td><td class="lb">Boolean</td><td><code>bool b = true;</code></td></tr>
+<tr><td><code>list</code></td><td class="lb">Dynamic array</td><td><code>list l = [1,2,3];</code></td></tr>
+<tr><td><code>map</code></td><td class="lb">Key-value store</td><td><code>map m = {"a":"b"};</code></td></tr>
+<tr><td><code>void</code></td><td class="lb">No return value</td><td><code>tantrum void foo()</code></td></tr>
+<tr><td><code>int*</code></td><td class="lb">Pointer to int</td><td><code>int* p = alloc int(5);</code></td></tr>
+</tbody>
+</table></div>
+
+<div class="callout warn"><span class="ci">⚠</span><div class="cb"><strong>Boolean Strictness</strong><p><code>if()</code> requires an actual <code>bool</code>. There is no implicit truthy/falsy conversion. <code>if(myList)</code> is a runtime error. Write <code>if(len(myList) > 0)</code>.</p></div></div>
+
+<h2 id="modes">Typing Modes</h2>
+<p>Every file can declare its own typing mode. The mode travels with the file through the compilation pipeline — imported files keep their own mode regardless of the importer's mode.</p>
+
+<div class="modes">
+  <div class="mcard">
+    <div class="mc-dir">#mode static;</div>
+    <div class="mc-title">Static</div>
+    <div class="mc-desc">All variables must have type annotations. All functions must declare return types. All code paths must return. Strictest mode — maximum compiler guarantees.</div>
+  </div>
+  <div class="mcard">
+    <div class="mc-dir">#mode dynamic;</div>
+    <div class="mc-title">Dynamic</div>
+    <div class="mc-desc">No type checking at all. <code>int x = "hello"</code> is fine. Useful for rapid prototyping or scripting-style code.</div>
+  </div>
+  <div class="mcard def">
+    <span class="def-badge">DEFAULT</span>
+    <div class="mc-dir">#mode both;</div>
+    <div class="mc-title">Both</div>
+    <div class="mc-desc">Mixed mode. Typed variables are type-checked. Untyped variables are dynamic. Best of both worlds for most programs.</div>
+  </div>
+</div>
+
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// static.42AHH</span>
+<span class="dr">#mode static;</span>
+
+<span class="kw">tantrum</span> <span class="ty">int</span> <span class="fn">add</span>(<span class="ty">int</span> a, <span class="ty">int</span> b)
+{{
+    <span class="kw">return</span> (a + b);   <span class="cm">// all paths must return</span>
+}}
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="ty">int</span> result = <span class="fn">add</span>(10, 20);
+    <span class="fn">print</span>(result);
+}}</code></pre>
+
+<h2 id="directives">Directive Order</h2>
+<p>Directives must appear at the top of the file, before any code. Order matters:</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// Correct order</span>
+<span class="dr">#mode static;</span>        <span class="cm">// 1. mode first</span>
+<span class="dr">#autoFree false;</span>     <span class="cm">// 2. autoFree second</span>
+<span class="dr">#allowMemoryLeaks true;</span>  <span class="cm">// 3. leaks third (requires autoFree false)</span>
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>() {{ ... }}</code></pre>
+
+<div class="pnav"><a href="syntax.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Syntax & Variables</span></a><a href="functions.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Functions</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

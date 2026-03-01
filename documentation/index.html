@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en" data-root="">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tantrums — Programming Language Docs</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Introduction</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-eye">📄 .42AHH → .42ass → 🚀</div>
+  <h1 class="hero-title"><span>Tantrums</span><br>Programming Language</h1>
+  <p class="hero-sub">A vibe-coded, bytecode-compiled language built from scratch in C++. Fast, honest about memory, and named after what building it makes you want to throw.</p>
+  <div class="badges">
+    <span class="badge br">11× faster than Python</span>
+    <span class="badge bp">7-layer memory safety</span>
+    <span class="badge bg">Zero-import profiling</span>
+    <span class="badge bb">Cross-platform bytecode</span>
+    <span class="badge by">v0.2.0</span>
+  </div>
+  <div class="hero-btns">
+    <a href="pages/quickstart.html" class="btn btn-p">→ Quick Start</a>
+    <a href="pages/examples.html" class="btn btn-s">See Examples</a>
+    <a href="https://github.com/plexescor/Tantrums" target="_blank" class="btn btn-s">GitHub ↗</a>
+  </div>
+</div>
+
+<!-- WHAT IS THIS -->
+<h2 id="what">What Is Tantrums?</h2>
+<p>Tantrums compiles <code>.42AHH</code> source files into <code>.42ass</code> bytecode, which runs on a custom stack-based virtual machine. It has optional static typing, a 7-layer memory safety system built without a garbage collector or borrow checker, and built-in profiling with zero imports required.</p>
+<p>Yes, those are the real file extensions. No, they are not changing.</p>
+
+<div class="callout info">
+  <span class="ci">ⓘ</span>
+  <div class="cb">
+    <strong>Full Disclosure</strong>
+    <p>This entire language — compiler, VM, bytecode format, VS Code extension — was vibe-coded with AI assistance. No formal language theory textbooks were opened. The major architectural decisions were made by the developer. The AI wrote the C++ implementation. It works, it's fast, and this documentation is honest about everything that went wrong during development.</p>
+  </div>
+</div>
+
+<!-- PIPELINE -->
+<h2 id="pipeline">The Compilation Pipeline</h2>
+<p>Every <code>.42AHH</code> file goes through five stages:</p>
+<div class="pipeline">
+  <div class="ps"><div class="pb">.42AHH</div><div class="psub">source file</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Lexer</div><div class="psub">tokens</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Parser</div><div class="psub">AST</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Compiler</div><div class="psub">type check + escape analysis</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">.42ass</div><div class="psub">bytecode binary</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Stack VM</div><div class="psub">execution</div></div>
+</div>
+<p>The <code>.42ass</code> bytecode is cross-platform — compile on Windows, run on Linux with the same file.</p>
+
+<!-- FEATURE GRID -->
+<h2 id="features">What's In v0.2.0</h2>
+<div class="grid">
+  <a href="pages/types.html" class="card"><div class="card-ico">⚙️</div><div class="card-title">Three Typing Modes</div><div class="card-desc">#mode static, dynamic, or both — chosen per file, isolated per import.</div></a>
+  <a href="pages/memory.html" class="card"><div class="card-ico">🛡️</div><div class="card-title">7-Layer Memory Safety</div><div class="card-desc">Escape analysis, auto-free, use-after-free, double-free, null deref, leak detection.</div></a>
+  <a href="pages/profiling.html" class="card"><div class="card-ico">📊</div><div class="card-title">Built-in Profiling</div><div class="card-desc">getCurrentTime(), getProcessMemory() — zero imports, right next to print().</div></a>
+  <a href="pages/pointers.html" class="card"><div class="card-ico">🔧</div><div class="card-title">Manual Memory</div><div class="card-desc">alloc / free with full runtime safety checks always on regardless of directives.</div></a>
+  <a href="pages/error-handling.html" class="card"><div class="card-ico">⚡</div><div class="card-title">Error Handling</div><div class="card-desc">try / catch with nested rethrow support. throw is always a string message.</div></a>
+  <a href="pages/imports.html" class="card"><div class="card-ico">📁</div><div class="card-title">Relative Imports</div><div class="card-desc">Quoted paths, subdirectories, per-file directive isolation. Zero bleed between files.</div></a>
+  <a href="pages/performance.html" class="card"><div class="card-ico">🚀</div><div class="card-title">11× Faster Than Python</div><div class="card-desc">No JIT. No native compilation. Just a tight bytecode VM with ObjRange optimization.</div></a>
+  <a href="pages/pipeline.html" class="card"><div class="card-ico">🎨</div><div class="card-title">VS Code Extension</div><div class="card-desc">Syntax highlighting, IntelliSense, hover docs, 30+ snippets, 20+ diagnostics.</div></a>
+</div>
+
+<!-- HELLO WORLD -->
+<h2 id="hello">Hello World</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{
+    <span class="fn">print</span>(<span class="st">"Hello, World!"</span>);
+}</code></pre>
+
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code><span class="cm"># run directly</span>
+tantrums run hello.42AHH
+
+<span class="cm"># or compile then execute separately</span>
+tantrums compile hello.42AHH   <span class="cm"># → hello.42ass</span>
+tantrums exec hello.42ass</code></pre>
+
+<!-- COMPARISON -->
+<h2 id="vs">At A Glance</h2>
+<div class="tw"><table>
+<thead><tr><th>Feature</th><th>Tantrums</th><th>Python</th><th>C</th><th>Rust</th></tr></thead>
+<tbody>
+<tr><td class="lb">Memory safety</td><td class="y">✓ 7 layers</td><td class="y">✓ GC</td><td class="n">✗ manual only</td><td class="y">✓ borrow checker</td></tr>
+<tr><td class="lb">Performance</td><td>11× Python</td><td>baseline</td><td>fastest</td><td>~C speed</td></tr>
+<tr><td class="lb">Built-in profiling</td><td class="y">✓ zero imports</td><td class="n">✗ needs psutil</td><td class="n">✗ external</td><td class="n">✗ external</td></tr>
+<tr><td class="lb">Typing</td><td>3 modes</td><td>dynamic+hints</td><td>static</td><td>static</td></tr>
+<tr><td class="lb">Manual memory option</td><td class="y">✓ optional</td><td class="n">✗</td><td class="y">✓ required</td><td class="y">✓ required</td></tr>
+<tr><td class="lb">Learning curve</td><td>low → high</td><td>low</td><td>high</td><td>very high</td></tr>
+</tbody>
+</table></div>
+
+<!-- STORIES -->
+<h2 id="stories">The Stories Behind The Language</h2>
+<p>The documentation is honest about everything that went wrong. These are real disasters that shaped the architecture.</p>
+
+<div class="fact">
+  <div class="fact-lbl">🔥 The 32GB RAM Incident</div>
+  <div class="fact-title">Why the garbage collector doesn't exist</div>
+  <p>A self-referencing map inside <code>while(true)</code> created reference cycles the original GC could never break. 16GB of RAM consumed. Then 16GB of page file. Hard reboot. The GC was removed on day 2 and replaced with the 7-layer system you see today.</p>
+</div>
+
+<div class="fact">
+  <div class="fact-lbl">🧵 The String Catastrophe</div>
+  <div class="fact-title">How a 5,500× speedup happened</div>
+  <p>Strings were originally stored as lists of characters — one heap allocation per character. A 200,000-character concatenation took 100 seconds. Python did the same in under 1 second. A complete rewrite to dynamic char buffers with geometric doubling brought it to 18 milliseconds.</p>
+</div>
+
+<!-- NAV -->
+<div class="pnav">
+  <a href="pages/quickstart.html" class="pnav-btn r">
+    <span class="pnl">Next →</span>
+    <span class="pnt">Quick Start</span>
+  </a>
+</div>
+
+</div>
+</main>
+</div>
+<script src="js/sidebar.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

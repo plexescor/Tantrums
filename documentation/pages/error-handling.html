@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Error Handling — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Error Handling</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Builtins</span>
+  <h1>Error Handling</h1>
+  <p class="ph-desc">throw, try/catch, and nested rethrow.</p>
+</div>
+
+<h2 id="throw">throw</h2>
+<p>Throw a string to halt execution with an error message:</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">throw</span> <span class="st">"Something went wrong!"</span>;</code></pre>
+
+<h2 id="trycatch">try / catch</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">try</span>
+{{
+    <span class="kw">throw</span> <span class="st">"oops"</span>;
+}}
+<span class="kw">catch</span> (e)
+{{
+    <span class="fn">print</span>(<span class="st">"Caught: "</span> + e);   <span class="cm">// → Caught: oops</span>
+}}
+
+<span class="cm">// Without error variable</span>
+<span class="kw">try</span> {{ <span class="kw">throw</span> <span class="st">"fail"</span>; }}
+<span class="kw">catch</span> {{ <span class="fn">print</span>(<span class="st">"Something failed"</span>); }}</code></pre>
+
+<h2 id="nested">Nested try / catch with rethrow</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">try</span>
+{{
+    <span class="kw">try</span>
+    {{
+        <span class="kw">throw</span> <span class="st">"inner error"</span>;
+    }}
+    <span class="kw">catch</span> (e)
+    {{
+        <span class="fn">print</span>(<span class="st">"Inner caught: "</span> + e);
+        <span class="kw">throw</span> <span class="st">"re-thrown from inner"</span>;
+    }}
+}}
+<span class="kw">catch</span> (e)
+{{
+    <span class="fn">print</span>(<span class="st">"Outer caught: "</span> + e);
+}}</code></pre>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Throw Is Always A String</strong><p>Tantrums throws string messages, not exception objects. No exception hierarchy to learn. No checked vs unchecked. No imports needed. The error IS the message.</p></div></div>
+
+<div class="pnav"><a href="profiling.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Profiling</span></a><a href="pipeline.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Compiler Pipeline</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

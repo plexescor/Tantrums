@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Syntax & Variables — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Syntax & Variables</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Language</span>
+  <h1>Syntax & Variables</h1>
+  <p class="ph-desc">Variables, strings, lists, maps, and comments.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#vars">Variables</a></li>
+<li><a href="#strings">Strings</a></li>
+<li><a href="#lists">Lists</a></li>
+<li><a href="#maps">Maps</a></li>
+<li><a href="#comments">Comments</a></li>
+</ol></div>
+
+<h2 id="vars">Variables</h2>
+<p>Variables can be dynamic (untyped) or statically typed. In <code>#mode both</code> (the default), both styles coexist.</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// Dynamic — no type annotation</span>
+x = 42;
+name = <span class="st">"Tantrums"</span>;
+alive = <span class="kw2">true</span>;
+
+<span class="cm">// Typed declarations</span>
+<span class="ty">int</span> count = 0;
+<span class="ty">float</span> pi = 3.14159;
+<span class="ty">string</span> lang = <span class="st">"Tantrums"</span>;
+<span class="ty">bool</span> ok = <span class="kw2">true</span>;
+<span class="ty">list</span> nums = [1, 2, 3];
+<span class="ty">map</span> data = {{<span class="st">"key"</span>: <span class="st">"value"</span>}};
+
+<span class="cm">// Default-initialized typed declarations</span>
+<span class="ty">list</span> items;   <span class="cm">// → []</span>
+<span class="ty">map</span> kv;       <span class="cm">// → {{}}</span>
+<span class="ty">int</span> y;        <span class="cm">// → null</span></code></pre>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>No Garbage Values</strong><p>Typed declarations always initialize to a safe default. You will never read garbage memory from an uninitialized Tantrums variable.</p></div></div>
+
+<h2 id="strings">Strings</h2>
+<p>Strings are double-quoted. Escape sequences are supported. Strings auto-concatenate with any other type when combined with <code>+</code>.</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="ty">string</span> s = <span class="st">"Hello, World!"</span>;
+<span class="fn">print</span>(s);
+
+<span class="cm">// Auto string concat — no explicit cast needed</span>
+<span class="ty">int</span> age = 17;
+<span class="fn">print</span>(<span class="st">"Age: "</span> + age);   <span class="cm">// → Age: 17</span>
+<span class="fn">print</span>(<span class="st">"Pi: "</span> + 3.14);    <span class="cm">// → Pi: 3.14</span>
+
+<span class="cm">// Escape sequences</span>
+<span class="fn">print</span>(<span class="st">"Line 1\nLine 2"</span>);
+<span class="fn">print</span>(<span class="st">"Tab:\there"</span>);
+<span class="fn">print</span>(<span class="st">"Quote: \"hello\""</span>);</code></pre>
+
+<div class="tw"><table>
+<thead><tr><th>Escape</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>\n</code></td><td class="lb">Newline</td></tr>
+<tr><td><code>\t</code></td><td class="lb">Tab</td></tr>
+<tr><td><code>\\</code></td><td class="lb">Backslash</td></tr>
+<tr><td><code>\"</code></td><td class="lb">Double quote</td></tr>
+<tr><td><code>\r</code></td><td class="lb">Carriage return</td></tr>
+<tr><td><code>\0</code></td><td class="lb">Null character</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="lists">Lists</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="ty">list</span> nums = [1, 2, 3, 4, 5];
+
+<span class="cm">// indexing</span>
+<span class="fn">print</span>(nums[0]);          <span class="cm">// → 1</span>
+
+<span class="cm">// length</span>
+<span class="fn">print</span>(<span class="fn">len</span>(nums));        <span class="cm">// → 5</span>
+
+<span class="cm">// append</span>
+<span class="fn">append</span>(nums, 99);
+<span class="fn">print</span>(nums[5]);          <span class="cm">// → 99</span>
+
+<span class="cm">// iterate</span>
+<span class="kw">for</span> item <span class="kw">in</span> nums {{ <span class="fn">print</span>(item); }}</code></pre>
+
+<h2 id="maps">Maps</h2>
+<p>Map keys must all be the same type. Mixing key types in one map is a runtime error.</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="ty">map</span> person = {{<span class="st">"name"</span>: <span class="st">"Alice"</span>, <span class="st">"age"</span>: <span class="st">"21"</span>}};
+
+<span class="cm">// access</span>
+<span class="fn">print</span>(person[<span class="st">"name"</span>]);    <span class="cm">// → Alice</span>
+
+<span class="cm">// assign</span>
+person[<span class="st">"city"</span>] = <span class="st">"Jaipur"</span>;
+
+<span class="cm">// length</span>
+<span class="fn">print</span>(<span class="fn">len</span>(person));       <span class="cm">// → 3</span></code></pre>
+
+<h2 id="comments">Comments</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// Single-line comment</span>
+
+<span class="cm">/* Multi-line
+   comment */</span></code></pre>
+
+<div class="pnav"><a href="building.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Building from Source</span></a><a href="types.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Types & Modes</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

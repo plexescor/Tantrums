@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Escape Analysis — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Escape Analysis</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Memory</span>
+  <h1>Escape Analysis</h1>
+  <p class="ph-desc">How the compiler determines if a pointer is provably local.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#how">How It Works</a></li>
+<li><a href="#nine">The 9 Escape Conditions</a></li>
+<li><a href="#examples">Examples</a></li>
+</ol></div>
+
+<h2 id="how">How It Works</h2>
+<p>When <code>#autoFree true</code> is active (the default), the compiler performs escape analysis on every pointer. It asks: <em>can this pointer outlive the current scope?</em></p>
+<p>If the answer is provably <strong>no</strong> (the pointer is used only locally), the compiler injects a <code>OP_FREE</code> bytecode instruction automatically. A compiler note is emitted:</p>
+
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code><span class="ok">[Tantrums] note: auto-freed 'p' at line 4 (provably local)</span></code></pre>
+
+<p>If any escape condition is detected, auto-free is skipped. The runtime safety net (Layer 3) may still catch it at scope exit.</p>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Suppress Notes</strong><p>Use the <code>--no-autofree-notes</code> flag to suppress auto-free compiler notes: <code>tantrums run myfile.42AHH --no-autofree-notes</code></p></div></div>
+
+<h2 id="nine">The 9 Escape Conditions</h2>
+<p>The compiler skips auto-free if <strong>any</strong> of these are true:</p>
+
+<ul class="escape-list">
+  <li><span class="enum">01</span><div><strong>Return statement</strong> — pointer appears in a <code>return (p);</code> expression. It must outlive the function.</div></li>
+  <li><span class="enum">02</span><div><strong>Function argument</strong> — pointer passed to any function. The callee might store it somewhere.</div></li>
+  <li><span class="enum">03</span><div><strong>append() call</strong> — pointer stored in a list. The list outlives the scope.</div></li>
+  <li><span class="enum">04</span><div><strong>Alias assignment</strong> — another variable is assigned to point to the same address (<code>q = p</code>). Freeing one would invalidate the other.</div></li>
+  <li><span class="enum">05</span><div><strong>Map storage</strong> — pointer stored as a map value. The map outlives the scope.</div></li>
+  <li><span class="enum">06</span><div><strong>Global variable</strong> — pointer assigned to a global. It must persist for program lifetime.</div></li>
+  <li><span class="enum">07</span><div><strong>Conditional branch</strong> — pointer appears inside an <code>if</code> branch. The compiler cannot statically guarantee which path executes.</div></li>
+  <li><span class="enum">08</span><div><strong>Complex expression</strong> — pointer used in a non-trivial expression context. Conservative: prefer safety over optimization.</div></li>
+  <li><span class="enum">09</span><div><strong>Multiple distinct uses</strong> — pointer used in more than one distinct context. Cannot safely determine a single free point.</div></li>
+</ul>
+
+<h2 id="examples">Examples</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// AUTO-FREED — provably local, no escape conditions triggered</span>
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">localOnly</span>()
+{{
+    <span class="ty">int*</span> p = <span class="kw">alloc</span> <span class="ty">int</span>(42);
+    <span class="fn">print</span>(*p);
+    <span class="cm">// compiler emits OP_FREE for p</span>
+    <span class="cm">// [Tantrums] note: auto-freed 'p' at line 3 (provably local)</span>
+}}
+
+<span class="cm">// NOT AUTO-FREED — condition 1: returned (escape condition)</span>
+<span class="kw">tantrum</span> <span class="ty">int*</span> <span class="fn">returnsPointer</span>()
+{{
+    <span class="ty">int*</span> p = <span class="kw">alloc</span> <span class="ty">int</span>(99);
+    <span class="kw">return</span> (p);   <span class="cm">// escape detected — caller must free</span>
+}}
+
+<span class="cm">// NOT AUTO-FREED — condition 4: aliased</span>
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">aliased</span>()
+{{
+    <span class="ty">int*</span> p = <span class="kw">alloc</span> <span class="ty">int</span>(10);
+    q = p;          <span class="cm">// alias detected — compiler won't auto-free either</span>
+    <span class="fn">print</span>(*q);
+    <span class="kw">free</span> p;         <span class="cm">// you must free manually</span>
+}}</code></pre>
+
+<div class="pnav"><a href="pointers.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Pointers & alloc</span></a><a href="leak-detection.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Leak Detection</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quick Start — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Quick Start</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Getting Started</span>
+  <h1>Quick Start</h1>
+  <p class="ph-desc">Get Tantrums installed and running in under 5 minutes.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#install">Installation</a></li>
+<li><a href="#hello">Hello World</a></li>
+<li><a href="#run">Running Files</a></li>
+<li><a href="#compile">Compiling vs Running</a></li>
+<li><a href="#flags">CLI Flags</a></li>
+</ol></div>
+
+<h2 id="install">Installation</h2>
+<p>Tantrums is built from source using CMake. There are no pre-built binaries yet — you compile the compiler.</p>
+<div class="callout warn"><span class="ci">⚠</span><div class="cb"><strong>Requirements</strong><p>CMake 3.15+, and a C++23 capable compiler: MSVC (Visual Studio 2022), GCC 13+, or Clang 16+.</p></div></div>
+
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code># Clone the repo
+git clone https://github.com/plexescor/Tantrums.git
+cd Tantrums
+
+# Configure (Release is recommended — debug build is ~2× slower)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+
+# Build
+cmake --build build --config Release</code></pre>
+
+<p>The resulting binary is at <code>build/Release/tantrums.exe</code> (Windows) or <code>build/tantrums</code> (Linux/Mac).</p>
+
+<h2 id="hello">Hello World</h2>
+<p>Create a file named <code>hello.42AHH</code>:</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="fn">print</span>(<span class="st">"Hello, World!"</span>);
+}}</code></pre>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Entry Point</strong><p>The <code>main()</code> function is called automatically. It must be named exactly <code>main</code>. No return type is required for main.</p></div></div>
+
+<h2 id="run">Running Files</h2>
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code># Compile + execute in one step
+tantrums run hello.42AHH
+
+# Output:
+# Hello, World!</code></pre>
+
+<h2 id="compile">Compiling vs Running</h2>
+<p>You can separate compilation and execution. The compiled <code>.42ass</code> bytecode is cross-platform — compile on Windows, run on Linux.</p>
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code># Step 1: compile to bytecode
+tantrums compile hello.42AHH
+# → produces hello.42ass in the same directory
+
+# Step 2: execute the bytecode
+tantrums exec hello.42ass
+
+# The .42ass file can be moved to any OS
+# as long as the Tantrums VM binary is present for that OS</code></pre>
+
+<h2 id="flags">CLI Flags</h2>
+<div class="tw"><table>
+<thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+<tbody>
+<tr><td><code>--no-autofree-notes</code></td><td class="lb">Suppresses compiler notes about auto-freed pointers</td></tr>
+</tbody>
+</table></div>
+
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code>tantrums run myprogram.42AHH --no-autofree-notes</code></pre>
+
+<div class="pnav"><a href="syntax.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Syntax & Variables</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

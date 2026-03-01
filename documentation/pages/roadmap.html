@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Roadmap — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Roadmap</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Deep Dive</span>
+  <h1>Roadmap</h1>
+  <p class="ph-desc">What's planned, what's not planned, and why.</p>
+</div>
+
+<p>Tantrums is in active development. The roadmap below reflects the developer's stated goals. Nothing here is guaranteed — this is what the developer wants to build.</p>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Development Context</strong><p>The developer is a student building this during school holidays and exam prep windows. Development velocity is high during holiday blocks and slower during exam season. This roadmap reflects medium-to-long term ambitions.</p></div></div>
+
+<h2 id="near">Near Term (v0.3 – v1.0)</h2>
+<div class="tw"><table>
+<thead><tr><th>Feature</th><th>Status</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td class="lb">Math stdlib module</td><td><span class="badge by">planned</span></td><td>sin, cos, sqrt, pow, abs, floor, ceil, pi, e</td></tr>
+<tr><td class="lb">File system module</td><td><span class="badge by">planned</span></td><td>use fs; — read, write, append, exists</td></tr>
+<tr><td class="lb">Switch statements</td><td><span class="badge by">planned</span></td><td>switch/case/default</td></tr>
+<tr><td class="lb">String manipulation builtins</td><td><span class="badge by">planned</span></td><td>split, trim, replace, contains, upper, lower</td></tr>
+<tr><td class="lb">Better import paths</td><td><span class="badge bg">done v0.2</span></td><td>Quoted paths, relative resolution, subdirectories</td></tr>
+<tr><td class="lb">Per-file directive isolation</td><td><span class="badge bg">done v0.2</span></td><td>Tristate AST fields, save/restore context</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="medium">Medium Term (v2.0)</h2>
+<div class="tw"><table>
+<thead><tr><th>Feature</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td class="lb">Slab allocator</td><td>Better memory performance for large numbers of allocations</td></tr>
+<tr><td class="lb">Complete math/fs/io stdlib</td><td>Full standard library coverage for common operations</td></tr>
+<tr><td class="lb">Anonymous functions / lambdas</td><td>Functions as values, basic closure support</td></tr>
+<tr><td class="lb">Package manager prototype</td><td>Install packages, use @package/module syntax</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="long">Long Term (v3.0 – v5.0)</h2>
+<div class="tw"><table>
+<thead><tr><th>Version</th><th>Feature</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>v3.0</code></td><td class="lb">Win32 window module</td><td>Native window creation</td></tr>
+<tr><td><code>v3.0</code></td><td class="lb">OpenGL graphics module</td><td>Triangles, shaders, 3D — game dev territory</td></tr>
+<tr><td><code>v4.0</code></td><td class="lb">LLVM JIT compiler</td><td>Near-native performance on hot paths</td></tr>
+<tr><td><code>v5.0</code></td><td class="lb">Native compilation</td><td>Target: ~80% of C performance</td></tr>
+<tr><td><code>v5.0</code></td><td class="lb">C/C++ FFI</td><td><code>foreign "C" { ... }</code></td></tr>
+</tbody>
+</table></div>
+
+<div class="callout warn"><span class="ci">⚠</span><div class="cb"><strong>Native Compilation Reality</strong><p>The developer has been honest: native compilation will be complex even with AI assistance. The most achievable near-term path is C transpilation — generate C from .42AHH source, then compile with GCC/Clang. True LLVM backend JIT is a longer-term goal.</p></div></div>
+
+<h2 id="not-planned">Intentionally Not Planned</h2>
+<div class="tw"><table>
+<thead><tr><th>Feature</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td class="lb">Pointer arithmetic</td><td>VM pointers are registry indices, not real addresses. Implemented, tested, produced garbage. Removed.</td></tr>
+<tr><td class="lb">Garbage collector</td><td>Caused 32GB RAM consumption on day 2. Replaced with 7-layer system. Not coming back.</td></tr>
+<tr><td class="lb">Implicit truthy/falsy</td><td>Intentional design choice. <code>if()</code> requires bool. This is a feature, not a gap.</td></tr>
+<tr><td class="lb">Type coercion</td><td>Intentional. JavaScript-style coercion is not in scope.</td></tr>
+</tbody>
+</table></div>
+
+<div class="pnav"><a href="examples.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Examples</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

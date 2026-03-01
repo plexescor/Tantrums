@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Building from Source — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Building from Source</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Getting Started</span>
+  <h1>Building from Source</h1>
+  <p class="ph-desc">Requirements, build commands, and verification.</p>
+</div>
+
+<h2 id="reqs">Requirements</h2>
+<div class="tw"><table>
+<thead><tr><th>Tool</th><th>Version</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td>CMake</td><td>3.15+</td><td class="lb">Build system</td></tr>
+<tr><td>MSVC</td><td>VS 2022</td><td class="lb">Windows (recommended)</td></tr>
+<tr><td>GCC</td><td>13+</td><td class="lb">Linux / Windows (MinGW)</td></tr>
+<tr><td>Clang</td><td>16+</td><td class="lb">Any platform</td></tr>
+</tbody>
+</table></div>
+
+<div class="callout danger"><span class="ci">⚠</span><div class="cb"><strong>C++23 Required</strong><p>The compiler uses C++23 features. Older compilers will fail. GCC 12, MSVC 2019, Clang 14 are NOT sufficient.</p></div></div>
+
+<h2 id="build">Build Commands</h2>
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code># Release build (always use for benchmarking or real use)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+
+# Debug build (for compiler development — ~2× slower)
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Debug
+cmake --build build --config Debug</code></pre>
+
+<h2 id="verify">Verify Build</h2>
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code># Windows
+.\build\Release\tantrums.exe run yourfile.42AHH
+
+# Linux / Mac
+./build/tantrums run yourfile.42AHH</code></pre>
+
+<div class="pnav"><a href="quickstart.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Quick Start</span></a><a href="syntax.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Syntax & Variables</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

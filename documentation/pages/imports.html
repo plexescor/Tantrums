@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Imports — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Imports</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Language</span>
+  <h1>Imports</h1>
+  <p class="ph-desc">Importing files with per-file directive isolation and relative path resolution.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#syntax">Syntax</a></li>
+<li><a href="#paths">Path Resolution</a></li>
+<li><a href="#isolation">Per-File Directive Isolation</a></li>
+<li><a href="#dedup">Deduplication</a></li>
+</ol></div>
+
+<h2 id="syntax">Syntax</h2>
+<p>Import all functions from another <code>.42AHH</code> file using the <code>use</code> statement. Both bare and quoted path syntaxes work.</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// Bare syntax (legacy, still works)</span>
+<span class="kw">use</span> helper.42AHH;
+
+<span class="cm">// Quoted syntax (supports subdirectories)</span>
+<span class="kw">use</span> <span class="st">"helper.42AHH"</span>;
+<span class="kw">use</span> <span class="st">"utils/math.42AHH"</span>;
+<span class="kw">use</span> <span class="st">"systems/physics.42AHH"</span>;
+<span class="kw">use</span> <span class="st">"deep/nested/helper.42AHH"</span>;</code></pre>
+
+<h2 id="paths">Path Resolution</h2>
+<p>Import paths resolve <strong>relative to the importing file's directory</strong> — not the working directory where you launched the <code>tantrums</code> command.</p>
+<pre><div class="ch"><span class="ch-lang">text</span><button class="copy-btn">Copy</button></div><code>project/
+├── main.42AHH
+└── utils/
+    ├── math.42AHH
+    └── strings.42AHH</code></pre>
+
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// In main.42AHH — these resolve relative to main.42AHH's directory</span>
+<span class="kw">use</span> <span class="st">"utils/math.42AHH"</span>;
+<span class="kw">use</span> <span class="st">"utils/strings.42AHH"</span>;
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="fn">mathAdd</span>(1, 2);   <span class="cm">// function from utils/math.42AHH</span>
+}}</code></pre>
+
+<h2 id="isolation">Per-File Directive Isolation</h2>
+<p>Each file's directives (<code>#mode</code>, <code>#autoFree</code>, <code>#allowMemoryLeaks</code>) apply only to that file. They do not bleed into the importer or other imports.</p>
+
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// main.42AHH — dynamic mode</span>
+<span class="dr">#mode dynamic;</span>
+<span class="kw">use</span> <span class="st">"strict_utils.42AHH"</span>;   <span class="cm">// this file uses #mode static</span>
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    x = <span class="st">"untyped"</span>;          <span class="cm">// OK — main.42AHH is dynamic</span>
+    <span class="fn">strictAdd</span>(1, 2);       <span class="cm">// strictAdd compiled under static rules from its own file</span>
+}}</code></pre>
+
+<div class="callout success"><span class="ci">✓</span><div class="cb"><strong>Zero Bleed</strong><p>The compiler saves and restores directive context around every imported node. A static file imported by a dynamic file stays static. A dynamic file imported by a static file stays dynamic. Complete isolation.</p></div></div>
+
+<h2 id="dedup">Deduplication & Circular Import Prevention</h2>
+<ul class="escape-list">
+  <li><span class="enum">→</span> If two files both import the same third file, it is only compiled once. No duplicate symbol errors.</li>
+  <li><span class="enum">→</span> Circular imports are detected and prevented. A imports B which imports A will not infinite loop.</li>
+</ul>
+
+<div class="pnav"><a href="operators.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Operators</span></a><a href="memory.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Memory Model</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

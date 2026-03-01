@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Profiling — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Profiling</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Builtins</span>
+  <h1>Profiling</h1>
+  <p class="ph-desc">Zero-import time and memory profiling functions.</p>
+</div>
+
+<p>Profiling functions are first-class builtins — no imports, no setup, available everywhere alongside <code>print()</code>.</p>
+
+<h2 id="time">Time Functions</h2>
+<div class="tw"><table>
+<thead><tr><th>Function</th><th>Returns</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>getCurrentTime()</code></td><td>int</td><td class="lb">Unix epoch timestamp in milliseconds</td></tr>
+<tr><td><code>toSeconds(ms)</code></td><td>float</td><td class="lb">Convert ms to seconds</td></tr>
+<tr><td><code>toMilliseconds(ms)</code></td><td>float</td><td class="lb">Convert ms to milliseconds</td></tr>
+<tr><td><code>toMinutes(ms)</code></td><td>float</td><td class="lb">Convert ms to minutes</td></tr>
+<tr><td><code>toHours(ms)</code></td><td>float</td><td class="lb">Convert ms to hours</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="memory">Memory Functions</h2>
+<div class="tw"><table>
+<thead><tr><th>Function</th><th>Returns</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>getProcessMemory()</code></td><td>int</td><td class="lb">Process RSS (Resident Set Size) in bytes</td></tr>
+<tr><td><code>getVmMemory()</code></td><td>int</td><td class="lb">Tantrums VM-managed heap in bytes</td></tr>
+<tr><td><code>getVmPeakMemory()</code></td><td>int</td><td class="lb">Peak VM heap usage since program start</td></tr>
+<tr><td><code>bytesToKB(bytes)</code></td><td>float</td><td class="lb">Convert bytes to KB</td></tr>
+<tr><td><code>bytesToMB(bytes)</code></td><td>float</td><td class="lb">Convert bytes to MB</td></tr>
+<tr><td><code>bytesToGB(bytes)</code></td><td>float</td><td class="lb">Convert bytes to GB</td></tr>
+</tbody>
+</table></div>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>RSS vs VM Heap</strong><p><code>getProcessMemory()</code> is the OS view — total memory used by the process including the VM binary itself. <code>getVmMemory()</code> is Tantrums's view — only the heap memory it allocated for your program's values. Both are useful for different things.</p></div></div>
+
+<h2 id="bench-example">Complete Benchmark Pattern</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="ty">int</span> startTime = <span class="fn">getCurrentTime</span>();
+    <span class="ty">int</span> startRam  = <span class="fn">getProcessMemory</span>();
+
+    <span class="cm">// ── your code here ──</span>
+    <span class="ty">int</span> sum = 0;
+    <span class="kw">for</span> i <span class="kw">in</span> <span class="fn">range</span>(1000000)
+    {{
+        sum += i;
+    }}
+    <span class="cm">// ────────────────────</span>
+
+    <span class="ty">int</span> endTime = <span class="fn">getCurrentTime</span>();
+    <span class="ty">int</span> endRam  = <span class="fn">getProcessMemory</span>();
+
+    <span class="fn">print</span>(<span class="st">"Result:  "</span> + sum);
+    <span class="fn">print</span>(<span class="st">"Time:    "</span> + <span class="fn">toSeconds</span>(endTime - startTime) + <span class="st">"s"</span>);
+    <span class="fn">print</span>(<span class="st">"RAM:     "</span> + <span class="fn">bytesToMB</span>(endRam) + <span class="st">" MB"</span>);
+    <span class="fn">print</span>(<span class="st">"PeakVM:  "</span> + <span class="fn">bytesToMB</span>(<span class="fn">getVmPeakMemory</span>()) + <span class="st">" MB"</span>);
+}}</code></pre>
+
+<div class="pnav"><a href="builtins.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Built-in Functions</span></a><a href="error-handling.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Error Handling</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

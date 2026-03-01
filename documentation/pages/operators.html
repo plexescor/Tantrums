@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Operators — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Operators</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Language</span>
+  <h1>Operators</h1>
+  <p class="ph-desc">Arithmetic, comparison, logical, compound assignment, and increment operators.</p>
+</div>
+
+<h2 id="arithmetic">Arithmetic</h2>
+<div class="tw"><table>
+<thead><tr><th>Operator</th><th>Description</th><th>Example</th></tr></thead>
+<tbody>
+<tr><td><code>+</code></td><td class="lb">Add / String concat</td><td><code>"age: " + 17 → "age: 17"</code></td></tr>
+<tr><td><code>-</code></td><td class="lb">Subtract</td><td><code>10 - 3 → 7</code></td></tr>
+<tr><td><code>*</code></td><td class="lb">Multiply</td><td><code>6 * 7 → 42</code></td></tr>
+<tr><td><code>/</code></td><td class="lb">Divide</td><td><code>10 / 3 → 3.33</code></td></tr>
+<tr><td><code>%</code></td><td class="lb">Modulo</td><td><code>10 % 3 → 1</code></td></tr>
+</tbody>
+</table></div>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Auto String Concat</strong><p>When one side of <code>+</code> is a string, the other side is automatically converted. No explicit cast needed. <code>"val: " + 42</code> → <code>"val: 42"</code>. This only activates when one side IS a string — two non-strings won't silently coerce.</p></div></div>
+
+<h2 id="comparison">Comparison</h2>
+<div class="tw"><table>
+<thead><tr><th>Operator</th><th>Meaning</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>==</code></td><td class="lb">Equal</td><td></td></tr>
+<tr><td><code>!=</code></td><td class="lb">Not equal</td><td></td></tr>
+<tr><td><code>&lt;</code></td><td class="lb">Less than</td><td></td></tr>
+<tr><td><code>&gt;</code></td><td class="lb">Greater than</td><td></td></tr>
+<tr><td><code>&lt;=</code></td><td class="lb">Less or equal</td><td></td></tr>
+<tr><td><code>&gt;=</code></td><td class="lb">Greater or equal</td><td></td></tr>
+<tr><td><code>=&gt;</code></td><td class="lb">Greater or equal</td><td>Fat-finger alias for &gt;=</td></tr>
+<tr><td><code>=&lt;</code></td><td class="lb">Less or equal</td><td>Fat-finger alias for &lt;=</td></tr>
+</tbody>
+</table></div>
+
+<div class="callout success"><span class="ci">✓</span><div class="cb"><strong>Fat-Finger Operators</strong><p><code>=&gt;</code> and <code>=&lt;</code> are intentional aliases. If you type them instead of <code>&gt;=</code> / <code>&lt;=</code>, the language understands. No silent error, no wrong result.</p></div></div>
+
+<h2 id="logical">Logical</h2>
+<div class="tw"><table>
+<thead><tr><th>Operator</th><th>Alias</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>&&</code></td><td><code>and</code></td><td class="lb">Logical AND (short-circuit)</td></tr>
+<tr><td><code>||</code></td><td><code>or</code></td><td class="lb">Logical OR (short-circuit)</td></tr>
+<tr><td><code>!</code></td><td></td><td class="lb">Logical NOT</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="compound">Compound Assignment & Increment</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code>i += 1;   i -= 2;   i *= 3;   i /= 4;   i %= 5;
+
+i++;   <span class="cm">// post-increment</span>
+++i;   <span class="cm">// pre-increment</span>
+i--;   <span class="cm">// post-decrement</span>
+--i;   <span class="cm">// pre-decrement</span></code></pre>
+
+<h2 id="division-zero">Division by Zero</h2>
+<div class="callout warn"><span class="ci">⚠</span><div class="cb"><strong>Protected</strong><p>Literal <code>x / 0</code> is caught at compile time. Variable division like <code>x / y</code> where <code>y</code> evaluates to zero is caught at runtime — a clean error instead of a crash or platform-specific undefined behavior.</p></div></div>
+
+<div class="pnav"><a href="control-flow.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Control Flow</span></a><a href="imports.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Imports</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

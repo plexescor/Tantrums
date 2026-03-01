@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Performance — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Performance</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Deep Dive</span>
+  <h1>Performance</h1>
+  <p class="ph-desc">Benchmarks, the ObjRange optimization, and the 5,500× string fix.</p>
+</div>
+
+<p>Benchmarks run on the same hardware comparing Tantrums v0.2.0 bytecode VM vs CPython. No JIT. No native compilation.</p>
+
+<h2 id="benchmarks">Benchmark Results</h2>
+<div class="tw"><table>
+<thead><tr><th>Test</th><th>Tantrums</th><th>Python</th><th>Speedup</th></tr></thead>
+<tbody>
+<tr><td class="lb">Raw loop 100M iterations</td><td class="y">4.26s</td><td>46.86s</td><td class="y">11× faster</td></tr>
+<tr><td class="lb">List 200K append</td><td class="y">0.018s</td><td>0.075s</td><td class="y">4× faster</td></tr>
+<tr><td class="lb">List 200K iterate</td><td class="y">0.013s</td><td>0.106s</td><td class="y">8× faster</td></tr>
+<tr><td class="lb">Map 50K insert</td><td class="y">0.004s</td><td>0.035s</td><td class="y">8.75× faster</td></tr>
+<tr><td class="lb">Baseline RAM usage</td><td class="y">3.96 MB</td><td>30.18 MB</td><td class="y">7.6× less</td></tr>
+</tbody>
+</table></div>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>ObjRange Effect</strong><p>The 11× loop speedup is largely explained by the <code>ObjRange</code> optimization. Python's <code>range(100_000_000)</code> creates a range object but still allocates iteration state. Tantrums's <code>range(N)</code> compiles to a counter/limit/step with zero heap allocation. The loop body hits no allocator at all.</p></div></div>
+
+<h2 id="memory-baseline">Memory Baseline</h2>
+<p>At startup, before your program does anything:</p>
+<ul class="escape-list">
+  <li><span class="enum">→</span><strong>Tantrums VM:</strong> 3.96 MB RSS — the VM binary, no runtime garbage collector overhead</li>
+  <li><span class="enum">→</span><strong>CPython:</strong> 30.18 MB RSS — interpreter, GC, object model, import system</li>
+</ul>
+
+<h2 id="string">The String Catastrophe & 5,500× Fix</h2>
+<div class="fact">
+  <div class="fact-lbl">🧵 Development Story</div>
+  <div class="fact-title">How strings went from 100 seconds to 18 milliseconds</div>
+  <p>Original string implementation stored each character as a separate list entry — one heap allocation per character. A 200,000-character concatenation required 200,000 allocations and took over 100 seconds. Python did the same operation in under 1 second. A complete rewrite to dynamic char buffers with geometric doubling (like std::string) brought it to 18ms. 5,500× speedup. The old implementation is gone.</p>
+</div>
+
+<h2 id="roadmap-perf">Future Performance</h2>
+<div class="tw"><table>
+<thead><tr><th>Version</th><th>Feature</th><th>Expected Gain</th></tr></thead>
+<tbody>
+<tr><td><code>v4.0</code></td><td class="lb">LLVM JIT Compiler</td><td>50-100× over Python on hot paths</td></tr>
+<tr><td><code>v5.0</code></td><td class="lb">Native Compilation</td><td>~80% of C performance (goal)</td></tr>
+<tr><td>current</td><td class="lb">String interning (planned)</td><td>Reduced string allocation pressure</td></tr>
+<tr><td>current</td><td class="lb">Constant folding (planned)</td><td>Compile-time arithmetic</td></tr>
+</tbody>
+</table></div>
+
+<div class="pnav"><a href="pipeline.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Compiler Pipeline</span></a><a href="examples.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Examples</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

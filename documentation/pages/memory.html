@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Memory Model — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Memory Model</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Memory</span>
+  <h1>Memory Model</h1>
+  <p class="ph-desc">The 7-layer safety system and four memory management personalities.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#seven">7-Layer Safety System</a></li>
+<li><a href="#personalities">Memory Personalities</a></li>
+<li><a href="#directives">Directives Reference</a></li>
+</ol></div>
+
+<h2 id="seven">The 7-Layer Safety System</h2>
+<p>Tantrums has no garbage collector and no borrow checker. Instead it uses seven stacked safety mechanisms — some compile-time, some runtime, some at exit.</p>
+
+<div class="layers">
+  <div class="layer lc"><div class="ln">1</div><div class="lt">compile</div><div class="ld"><strong>Escape Analysis</strong> — 9 conditions determine if a pointer is provably local. If yes, auto-free is injected as a bytecode instruction.</div></div>
+  <div class="layer lc"><div class="ln">2</div><div class="lt">compile</div><div class="ld"><strong>Compile-time Auto-Free Injection</strong> — <code>OP_FREE</code> bytecode emitted for provably local pointers. Zero runtime overhead.</div></div>
+  <div class="layer lr"><div class="ln">3</div><div class="lt">runtime</div><div class="ld"><strong>Runtime Auto-Free</strong> — Scope-exit safety net. Catches anything escape analysis missed. Always active when <code>#autoFree true</code>.</div></div>
+  <div class="layer lr"><div class="ln">4</div><div class="lt">runtime</div><div class="ld"><strong>Use-After-Free Detection</strong> — Pointer registry nulled immediately on <code>free</code>. Dereference after free = clean error with line number.</div></div>
+  <div class="layer lr"><div class="ln">5</div><div class="lt">runtime</div><div class="ld"><strong>Double-Free Detection</strong> — Same mechanism. Pointer is null after first free. Second free = clean error. No heap corruption.</div></div>
+  <div class="layer lr"><div class="ln">6</div><div class="lt">runtime</div><div class="ld"><strong>Null Dereference Detection</strong> — All pointer dereferences validated. Null dereference = clean error with line number. No segfault.</div></div>
+  <div class="layer le"><div class="ln">7</div><div class="lt">exit</div><div class="ld"><strong>Leak Detector</strong> — On program exit, all unfreed allocations reported with line numbers, types, sizes. &gt;5 leaks → <code>memleaklog.txt</code>.</div></div>
+</div>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Always On</strong><p>Layers 4, 5, 6, and 7 are always active regardless of <code>#autoFree</code> or <code>#allowMemoryLeaks</code> settings. Safety checks cannot be disabled. Only the auto-free behavior changes.</p></div></div>
+
+<h2 id="personalities">Memory Personalities</h2>
+<p>Two directives produce four distinct memory management philosophies:</p>
+
+<div class="pgrid">
+  <div class="pcard">
+    <div class="pflags"><span class="flag ft">autoFree: true</span><span class="flag ff">allowLeaks: false</span></div>
+    <div class="pct">Automatic (Default)</div>
+    <div class="pcd">Escape analysis + runtime auto-free. Provably local pointers freed automatically. Runtime catches the rest. Closest to GC ergonomics without a GC.</div>
+  </div>
+  <div class="pcard">
+    <div class="pflags"><span class="flag ff">autoFree: false</span><span class="flag ff">allowLeaks: false</span></div>
+    <div class="pct">Manual / C-style</div>
+    <div class="pcd">You free everything. Leak detector reports what you missed. Runtime safety checks still active. Maximum control with a safety net.</div>
+  </div>
+  <div class="pcard">
+    <div class="pflags"><span class="flag ff">autoFree: false</span><span class="flag ft">allowLeaks: true</span></div>
+    <div class="pct">Arena / Region</div>
+    <div class="pcd">Intentional leaks. Compile-time leak errors become warnings. Program runs even with leaked pointers. OS reclaims on exit. Classic arena allocation pattern.</div>
+  </div>
+  <div class="pcard inv">
+    <div class="pflags"><span class="flag ft">autoFree: true</span><span class="flag fi">allowLeaks: true</span></div>
+    <div class="pct">⚠ Invalid Combination</div>
+    <div class="pcd">Auto-free and allow-leaks cannot be used together. The compiler will reject this combination with a compile error.</div>
+  </div>
+</div>
+
+<h2 id="directives">Directives Reference</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// Personality 1: Automatic (default — no directives needed)</span>
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>() {{ ... }}
+
+<span class="cm">// Personality 2: Manual / C-style</span>
+<span class="dr">#autoFree false;</span>
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>() {{ ... }}
+
+<span class="cm">// Personality 3: Arena</span>
+<span class="dr">#autoFree false;</span>
+<span class="dr">#allowMemoryLeaks true;</span>
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>() {{ ... }}
+
+<span class="cm">// Personality 4: INVALID — compile error</span>
+<span class="dr">#autoFree true;</span>
+<span class="er">#allowMemoryLeaks true;</span>   <span class="cm">// ← COMPILE ERROR</span></code></pre>
+
+<div class="fact">
+  <div class="fact-lbl">🔥 The 32GB RAM Incident</div>
+  <div class="fact-title">Why the garbage collector doesn't exist</div>
+  <p>The original design used reference-counting GC. A self-referencing map in a <code>while(true)</code> loop created a reference cycle the GC could never break. 16GB of RAM consumed. Then 16GB of page file. Hard reboot. The GC was removed and replaced with this 7-layer system on day 2 of development.</p>
+</div>
+
+<div class="pnav"><a href="imports.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Imports</span></a><a href="pointers.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Pointers & alloc</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

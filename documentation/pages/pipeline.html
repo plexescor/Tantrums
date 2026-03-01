@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Compiler Pipeline — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Compiler Pipeline</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Deep Dive</span>
+  <h1>Compiler Pipeline</h1>
+  <p class="ph-desc">Lexer → Parser → Semantic Analyzer → Codegen → Stack VM.</p>
+</div>
+
+<p>Every <code>.42AHH</code> file travels through five stages. Each stage has a clear, separated responsibility.</p>
+
+<div class="pipeline">
+  <div class="ps"><div class="pb">.42AHH</div><div class="psub">source text</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Lexer</div><div class="psub">tokens</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Parser</div><div class="psub">AST</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Semantic Analyzer</div><div class="psub">type check + escape analysis</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Codegen</div><div class="psub">.42ass bytecode</div></div>
+  <span class="par">→</span>
+  <div class="ps"><div class="pb">Stack VM</div><div class="psub">execution</div></div>
+</div>
+
+<h2 id="stages">Stage Details</h2>
+
+<h3>1. Lexer</h3>
+<p>Converts raw source text into a stream of tokens. Keywords, operators, literals, identifiers. File-level directives (<code>#mode</code>, <code>#autoFree</code>, <code>#allowMemoryLeaks</code>) are stripped here and recorded before the lexer sees them — so they never produce tokens.</p>
+
+<h3>2. Parser</h3>
+<p>Recursive descent parser. Converts the token stream into an Abstract Syntax Tree (AST). Every language construct becomes a node. The parser uses backpatching for jump instructions — emits placeholder offsets and fills them in after the target is known.</p>
+
+<h3>3. Semantic Analyzer</h3>
+<p>Runs over the AST performing:</p>
+<ul class="escape-list">
+  <li><span class="enum">→</span>Type checking (in static and both modes)</li>
+  <li><span class="enum">→</span>Escape analysis for every pointer declaration</li>
+  <li><span class="enum">→</span>Arity checking (correct number of arguments)</li>
+  <li><span class="enum">→</span>Return path validation (all paths return in static mode)</li>
+  <li><span class="enum">→</span>Directive isolation — per-file mode/memory rules applied to each AST node</li>
+</ul>
+
+<h3>4. Code Generator</h3>
+<p>Walks the typed, analyzed AST and emits bytecode instructions. Injects <code>OP_FREE</code> for provably-local pointers. Stores per-file directive flags in the <code>.42ass</code> binary header so the VM knows each function's rules at runtime.</p>
+
+<h3>5. Stack-Based VM</h3>
+<p>Executes the <code>.42ass</code> bytecode. Operations push and pop from a value stack. Function calls create stack frames. The VM exposes its internal heap state via <code>getVmMemory()</code> and <code>getVmPeakMemory()</code>. The 16,384 frame limit applies here.</p>
+
+<h2 id="bytecode">The .42ass Format</h2>
+<p>The bytecode format is a custom binary with a header containing directive flags, a constant pool (up to 65,535 entries), and instruction sequences. It is cross-platform — the same <code>.42ass</code> file runs on any OS where the Tantrums VM binary is available for that OS.</p>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Catch Is Goto</strong><p>Error handling in the VM is implemented as structured goto. <code>TryCatchRecord</code> entries on a stack store bytecode offsets. When <code>throw</code> executes, the VM sets the instruction pointer to the catch offset. This is documented honestly because it's how it works.</p></div></div>
+
+<div class="pnav"><a href="error-handling.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Error Handling</span></a><a href="performance.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Performance</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

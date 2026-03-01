@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pointers & alloc — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Pointers & alloc</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Memory</span>
+  <h1>Pointers & alloc</h1>
+  <p class="ph-desc">Allocating, dereferencing, passing, and freeing pointers.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#alloc">alloc & free</a></li>
+<li><a href="#deref">Dereferencing</a></li>
+<li><a href="#passing">Passing Pointers</a></li>
+<li><a href="#not-supported">Not Supported</a></li>
+<li><a href="#errors">Runtime Errors</a></li>
+</ol></div>
+
+<h2 id="alloc">alloc & free</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="cm">// Allocate a value on the heap</span>
+<span class="ty">int*</span> p = <span class="kw">alloc</span> <span class="ty">int</span>(42);
+
+<span class="cm">// Read the value</span>
+<span class="fn">print</span>(*p);    <span class="cm">// → 42</span>
+
+<span class="cm">// Write the value</span>
+*p = 99;
+<span class="fn">print</span>(*p);    <span class="cm">// → 99</span>
+
+<span class="cm">// Free the allocation</span>
+<span class="kw">free</span> p;</code></pre>
+
+<h2 id="deref">Dereferencing</h2>
+<p>The <code>*</code> prefix operator dereferences a pointer for both read and write:</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="ty">int*</span> a = <span class="kw">alloc</span> <span class="ty">int</span>(10);
+<span class="ty">int*</span> b = <span class="kw">alloc</span> <span class="ty">int</span>(20);
+
+<span class="ty">int</span> sum = *a + *b;   <span class="cm">// → 30</span>
+*a = *a + 5;          <span class="cm">// → a now points to 15</span>
+
+<span class="kw">free</span> a;
+<span class="kw">free</span> b;</code></pre>
+
+<h2 id="passing">All Supported Pointer Operations</h2>
+<div class="tw"><table>
+<thead><tr><th>Operation</th><th>Example</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td class="lb">Allocate</td><td><code>int* p = alloc int(42);</code></td><td>Creates heap allocation</td></tr>
+<tr><td class="lb">Free</td><td><code>free p;</code></td><td>Releases allocation, nulls registry entry</td></tr>
+<tr><td class="lb">Dereference read</td><td><code>print(*p);</code></td><td>Reads value</td></tr>
+<tr><td class="lb">Dereference write</td><td><code>*p = 99;</code></td><td>Writes value</td></tr>
+<tr><td class="lb">Alias</td><td><code>q = p;</code></td><td>Both point to same address. Escape analysis notes this.</td></tr>
+<tr><td class="lb">Pass to function</td><td><code>foo(p);</code></td><td>Escape analysis notes this</td></tr>
+<tr><td class="lb">Return from function</td><td><code>return (p);</code></td><td>Requires <code>int*</code> return type declared</td></tr>
+<tr><td class="lb">Append to list</td><td><code>append(myList, p);</code></td><td>Escape analysis notes this</td></tr>
+<tr><td class="lb">Store in map</td><td><code>m["key"] = p;</code></td><td>Escape analysis notes this</td></tr>
+</tbody>
+</table></div>
+
+<h2 id="not-supported">Not Supported</h2>
+<div class="tw"><table>
+<thead><tr><th>Operation</th><th>Reason</th></tr></thead>
+<tbody>
+<tr><td><code>&x</code></td><td class="lb">Address-of: VM pointers are registry entries, not real memory addresses</td></tr>
+<tr><td><code>p + 1</code></td><td class="lb">Pointer arithmetic: registry entries have no meaningful numeric adjacency</td></tr>
+<tr><td><code>(int*)p</code></td><td class="lb">Type casting: not supported</td></tr>
+</tbody>
+</table></div>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>Why No Pointer Arithmetic?</strong><p>Pointer arithmetic was implemented, tested, and removed. VM pointers are indices into a pointer registry — not actual memory addresses. <code>p + 1</code> produces a garbage registry index. The correct decision was to remove it. It is documented in a hidden file in the repository.</p></div></div>
+
+<h2 id="errors">Runtime Error Messages</h2>
+<pre><div class="ch"><span class="ch-lang">terminal</span><button class="copy-btn">Copy</button></div><code><span class="er">[Tantrums Runtime Error] Null pointer dereference! Line 8.</span>
+<span class="cm">  → Caused by: use-after-free, double-free, or genuine null dereference</span>
+
+<span class="er">[Tantrums Runtime Error] Division by zero! Line 12.</span></code></pre>
+
+<div class="pnav"><a href="memory.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Memory Model</span></a><a href="escape-analysis.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Escape Analysis</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>

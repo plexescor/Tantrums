@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" data-root="../">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Functions — Tantrums Docs</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div class="layout">
+<main class="main">
+<div class="topbar">
+  <div class="breadcrumb">
+    <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open');document.querySelector('.overlay').classList.toggle('on')">☰</button>
+    <span class="bc-par">Tantrums</span><span class="bc-sep">/</span>
+    <span class="bc-cur">Functions</span>
+  </div>
+  <div class="topbar-r"><span class="ver-tag">v0.2.0</span></div>
+</div>
+<div class="page">
+<div class="ph">
+  <span class="ph-tag">Language</span>
+  <h1>Functions</h1>
+  <p class="ph-desc">Declaring functions with the tantrum keyword.</p>
+</div>
+
+<div class="toc"><div class="toc-title">On This Page</div><ol>
+<li><a href="#basic">Basic Functions</a></li>
+<li><a href="#void">Void Functions</a></li>
+<li><a href="#pointers">Pointer Return Types</a></li>
+<li><a href="#dynamic">Dynamic Functions</a></li>
+<li><a href="#static-rules">Static Mode Rules</a></li>
+<li><a href="#recursion">Recursion</a></li>
+</ol></div>
+
+<h2 id="basic">Basic Functions</h2>
+<p>Functions are declared with the <code>tantrum</code> keyword. Return values must be wrapped in parentheses.</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="ty">int</span> <span class="fn">add</span>(<span class="ty">int</span> a, <span class="ty">int</span> b)
+{{
+    <span class="kw">return</span> (a + b);
+}}
+
+<span class="kw">tantrum</span> <span class="ty">string</span> <span class="fn">greet</span>(<span class="ty">string</span> name)
+{{
+    <span class="kw">return</span> (<span class="st">"Hello, "</span> + name + <span class="st">"!"</span>);
+}}
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="fn">print</span>(<span class="fn">add</span>(3, 4));          <span class="cm">// → 7</span>
+    <span class="fn">print</span>(<span class="fn">greet</span>(<span class="st">"World"</span>));    <span class="cm">// → Hello, World!</span>
+}}</code></pre>
+
+<div class="callout warn"><span class="ci">⚠</span><div class="cb"><strong>Return Parentheses</strong><p>Return values are always wrapped in parentheses: <code>return (value);</code>. This is intentional syntax — not optional.</p></div></div>
+
+<h2 id="void">Void Functions</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">printLine</span>(<span class="ty">string</span> msg)
+{{
+    <span class="fn">print</span>(msg);
+    <span class="cm">// no return needed</span>
+}}
+
+<span class="cm">// Void functions cannot be used in expressions:</span>
+<span class="cm">// x = printLine("hi");   ← COMPILE ERROR in static mode</span></code></pre>
+
+<h2 id="pointers">Pointer Return Types</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="ty">int*</span> <span class="fn">makeValue</span>(<span class="ty">int</span> val)
+{{
+    <span class="ty">int*</span> p = <span class="kw">alloc</span> <span class="ty">int</span>(val);
+    <span class="kw">return</span> (p);  <span class="cm">// returning a pointer — escape analysis skips auto-free</span>
+}}
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="ty">int*</span> p = <span class="fn">makeValue</span>(42);
+    <span class="fn">print</span>(*p);  <span class="cm">// → 42</span>
+    <span class="kw">free</span> p;
+}}</code></pre>
+
+<h2 id="dynamic">Dynamic Functions</h2>
+<p>In <code>#mode dynamic</code> or <code>#mode both</code>, functions can omit all type annotations:</p>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="fn">multiply</span>(a, b)
+{{
+    <span class="kw">return</span> (a * b);
+}}
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="fn">print</span>(<span class="fn">multiply</span>(6, 7));   <span class="cm">// → 42</span>
+    <span class="fn">print</span>(<span class="fn">multiply</span>(2.5, 4.0)); <span class="cm">// → 10.0</span>
+}}</code></pre>
+
+<h2 id="static-rules">Static Mode Rules</h2>
+<p>In <code>#mode static</code>, functions have strict requirements:</p>
+<ul class="escape-list">
+  <li><span class="enum">✓</span> Must declare a return type (<code>int</code>, <code>float</code>, <code>string</code>, <code>bool</code>, <code>list</code>, <code>map</code>, <code>void</code>, <code>int*</code>)</li>
+  <li><span class="enum">✓</span> Non-void functions must have a <code>return</code> statement</li>
+  <li><span class="enum">✓</span> All code paths must return a value</li>
+  <li><span class="enum">✓</span> Return type must match the declared type</li>
+  <li><span class="enum">✓</span> Void functions cannot return a value</li>
+  <li><span class="enum">✓</span> Void functions cannot be used in expressions</li>
+  <li><span class="enum">✓</span> All parameters must have type annotations</li>
+  <li><span class="enum">✓</span> Arity is checked at compile time</li>
+</ul>
+
+<div class="callout info"><span class="ci">ⓘ</span><div class="cb"><strong>main() Exception</strong><p>In <code>#mode static</code>, the <code>main()</code> function does not require a return type declaration. It is exempt from the mandatory annotation rule.</p></div></div>
+
+<h2 id="recursion">Recursion</h2>
+<pre><div class="ch"><span class="ch-lang">tantrums (.42AHH)</span><button class="copy-btn">Copy</button></div><code><span class="kw">tantrum</span> <span class="ty">int</span> <span class="fn">fib</span>(<span class="ty">int</span> n)
+{{
+    <span class="kw">if</span> (n <= 1) {{ <span class="kw">return</span> (n); }}
+    <span class="kw">return</span> (<span class="fn">fib</span>(n - 1) + <span class="fn">fib</span>(n - 2));
+}}
+
+<span class="kw">tantrum</span> <span class="ty">void</span> <span class="fn">main</span>()
+{{
+    <span class="kw">for</span> i <span class="kw">in</span> <span class="fn">range</span>(10) {{ <span class="fn">print</span>(<span class="fn">fib</span>(i)); }}
+}}</code></pre>
+
+<div class="callout warn"><span class="ci">⚠</span><div class="cb"><strong>Stack Limit</strong><p>The VM has a 16,384 frame stack limit. Deep recursion will hit this limit and throw a stack overflow error. Iterative approaches are preferred for large inputs.</p></div></div>
+
+<div class="pnav"><a href="types.html" class="pnav-btn"><span class="pnl">← Previous</span><span class="pnt">Types & Modes</span></a><a href="control-flow.html" class="pnav-btn r"><span class="pnl">Next →</span><span class="pnt">Control Flow</span></a></div>
+</div>
+</main>
+</div>
+<script src="../js/sidebar.js"></script>
+<script src="../js/main.js"></script>
+</body>
+</html>
