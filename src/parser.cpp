@@ -7,6 +7,8 @@ typedef struct {
     TokenList* tokens;
     int        current;
     bool       had_error;
+    bool       switch_break_mode; /* #switchBreakMode: true = explicit break needed, false = auto-break */
+    bool       seen_switch_break_mode;
 } Parser;
 
 /* ── Helpers ──────────────────────────────────────── */
@@ -560,11 +562,76 @@ static ASTNode* func_declaration(Parser* p) {
     return n;
 }
 
+static ASTNode* switch_statement(Parser* p) {
+    int line = previous(p)->line;
+    ASTNode* n = ast_new(NODE_SWITCH, line);
+    n->as.switch_stmt.subject = nullptr;
+    n->as.switch_stmt.case_values = nullptr;
+    n->as.switch_stmt.case_bodies = nullptr;
+    n->as.switch_stmt.case_count  = 0;
+    n->as.switch_stmt.default_idx = -1;
+    n->as.switch_stmt.break_mode  = p->switch_break_mode;
+
+    consume(p, TOKEN_LEFT_PAREN, "Expected '(' after 'switch'.");
+    n->as.switch_stmt.subject = expression(p);
+    consume(p, TOKEN_RIGHT_PAREN, "Expected ')' after switch expression.");
+    consume(p, TOKEN_LEFT_BRACE, "Expected '{' after switch(...).");
+
+    int cap = 0;
+
+    while (!check(p, TOKEN_RIGHT_BRACE) && !is_at_end(p)) {
+        bool is_default = false;
+        ASTNode* case_val = nullptr;
+
+        if (match(p, TOKEN_CASE)) {
+            consume(p, TOKEN_LEFT_PAREN, "Expected '(' after 'case'.");
+            case_val = expression(p);
+            consume(p, TOKEN_RIGHT_PAREN, "Expected ')' after case value.");
+        } else if (match(p, TOKEN_DEFAULT)) {
+            is_default = true;
+            if (n->as.switch_stmt.default_idx != -1) {
+                fprintf(stderr, "[Line %d] Error: Multiple 'default' cases in switch.\n", previous(p)->line);
+                p->had_error = true;
+            }
+        } else {
+            fprintf(stderr, "[Line %d] Error: Expected 'case' or 'default' inside switch.\n", peek_tok(p)->line);
+            p->had_error = true;
+            advance_tok(p);
+            continue;
+        }
+
+        /* Parse the case body block */
+        consume(p, TOKEN_LEFT_BRACE, "Expected '{' after case/default.");
+        ASTNode* body = ast_new(NODE_BLOCK, previous(p)->line);
+        nodelist_init(&body->as.block);
+        while (!check(p, TOKEN_RIGHT_BRACE) && !is_at_end(p)) {
+            nodelist_add(&body->as.block, declaration(p));
+        }
+        consume(p, TOKEN_RIGHT_BRACE, "Expected '}' after case body.");
+
+        /* Grow arrays */
+        if (n->as.switch_stmt.case_count >= cap) {
+            cap = cap < 4 ? 4 : cap * 2;
+            n->as.switch_stmt.case_values = (ASTNode**)realloc(n->as.switch_stmt.case_values, sizeof(ASTNode*) * cap);
+            n->as.switch_stmt.case_bodies = (ASTNode**)realloc(n->as.switch_stmt.case_bodies, sizeof(ASTNode*) * cap);
+        }
+
+        int idx = n->as.switch_stmt.case_count++;
+        n->as.switch_stmt.case_values[idx] = case_val; /* nullptr for default */
+        n->as.switch_stmt.case_bodies[idx]  = body;
+        if (is_default) n->as.switch_stmt.default_idx = idx;
+    }
+
+    consume(p, TOKEN_RIGHT_BRACE, "Expected '}' after switch body.");
+    return n;
+}
+
 static ASTNode* statement(Parser* p) {
     if (match(p, TOKEN_LEFT_BRACE)) return block(p);
     if (match(p, TOKEN_IF))     return if_statement(p);
     if (match(p, TOKEN_WHILE))  return while_statement(p);
     if (match(p, TOKEN_FOR))    return for_statement(p);
+    if (match(p, TOKEN_SWITCH)) return switch_statement(p);
     
     if (match(p, TOKEN_BREAK)) {
         ASTNode* n = ast_new(NODE_BREAK, previous(p)->line);
@@ -708,6 +775,8 @@ ASTNode* parser_parse(TokenList* tokens) {
     p.tokens = tokens;
     p.current = 0;
     p.had_error = false;
+    p.switch_break_mode = false;       /* default: auto-break (no fallthrough) */
+    p.seen_switch_break_mode = false;
 
     ASTNode* program = ast_new(NODE_PROGRAM, 1);
     nodelist_init(&program->as.program);
@@ -778,6 +847,25 @@ ASTNode* parser_parse(TokenList* tokens) {
             ASTNode* allow_leaks_node = ast_new(NODE_ALLOW_LEAKS, tok->line);
             allow_leaks_node->as.allow_leaks.enabled = enabled;
             nodelist_add(&program->as.program, allow_leaks_node);
+        } else if (check(&p, TOKEN_SWITCH_BREAK_MODE_KW)) {
+            Token* tok = advance_tok(&p);
+            if (p.seen_switch_break_mode) {
+                fprintf(stderr, "[Line %d] Error: #switchBreakMode directive already declared.\n", tok->line);
+                p.had_error = true;
+            }
+            p.seen_switch_break_mode = true;
+            bool enabled = false;
+            if (match(&p, TOKEN_TRUE)) {
+                enabled = true;
+            } else if (match(&p, TOKEN_FALSE)) {
+                enabled = false;
+            } else {
+                fprintf(stderr, "[Line %d] Error: #switchBreakMode value must be 'true' or 'false'.\n", tok->line);
+                p.had_error = true;
+                if (!is_at_end(&p) && !check(&p, TOKEN_SEMICOLON)) advance_tok(&p);
+            }
+            consume(&p, TOKEN_SEMICOLON, "Expected ';' after #switchBreakMode directive.");
+            p.switch_break_mode = enabled;
         } else {
             seen_code = true;
             nodelist_add(&program->as.program, declaration(&p));

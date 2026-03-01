@@ -18,6 +18,7 @@ typedef enum {
     NODE_IF, NODE_WHILE, NODE_FOR_IN,
     NODE_FUNC_DECL, NODE_RETURN, NODE_THROW, NODE_FREE,
     NODE_USE, NODE_TRY_CATCH, NODE_BREAK, NODE_CONTINUE,
+    NODE_SWITCH,
     NODE_PROGRAM, NODE_AUTOFREE, NODE_ALLOW_LEAKS,
 } NodeType;
 
@@ -60,6 +61,14 @@ struct ASTNode {
         NodeList program;                                             /* PROGRAM   */
         struct { bool enabled; } autofree;                            /* AUTOFREE  */
         struct { bool enabled; } allow_leaks;                         /* ALLOW_LEAKS */
+        struct {
+            ASTNode*  subject;       /* switch (subject) */
+            ASTNode** case_values;   /* array of exprs; nullptr = default */
+            ASTNode** case_bodies;   /* array of NodeList-as-block nodes  */
+            int       case_count;
+            int       default_idx;   /* index of default case, -1 if none */
+            bool      break_mode;    /* true = explicit break required (C-style) */
+        } switch_stmt;               /* SWITCH */
     } as;
 };
 

@@ -72,9 +72,16 @@ static TokenType identifier_type(Lexer* l) {
         if (len == 4 && memcmp(l->start, "bool", 4) == 0) return TOKEN_TYPE_BOOL;
         if (len == 5 && memcmp(l->start, "break", 5) == 0) return TOKEN_BREAK;
         break;
+    case 's':
+        if (len == 6 && memcmp(l->start, "switch", 6) == 0) return TOKEN_SWITCH;
+        return check_keyword(l, 1, 5, "tring", TOKEN_TYPE_STRING);
     case 'c':
+        if (len == 4 && memcmp(l->start, "case", 4) == 0) return TOKEN_CASE;
         if (len == 5 && memcmp(l->start, "catch", 5) == 0) return TOKEN_CATCH;
         if (len == 8 && memcmp(l->start, "continue", 8) == 0) return TOKEN_CONTINUE;
+        break;
+    case 'd':
+        if (len == 7 && memcmp(l->start, "default", 7) == 0) return TOKEN_DEFAULT;
         break;
     case 'e': return check_keyword(l, 1, 3, "lse", TOKEN_ELSE);
     case 'f':
@@ -98,7 +105,6 @@ static TokenType identifier_type(Lexer* l) {
         if (len == 2 && l->start[1] == 'r') return TOKEN_OR;
         break;
     case 'r': return check_keyword(l, 1, 5, "eturn", TOKEN_RETURN);
-    case 's': return check_keyword(l, 1, 5, "tring", TOKEN_TYPE_STRING);
     case 't':
         if (len > 1) {
             switch (l->start[1]) {
@@ -205,6 +211,9 @@ static Token scan_token(Lexer* l) {
     case '#': {
         while (!is_at_end(l) && isalpha(peek(l))) advance(l);
         int len = (int)(l->current - l->start);
+        if (len == 16 && memcmp(l->start, "#switchBreakMode", 16) == 0) {
+            return make_token(l, TOKEN_SWITCH_BREAK_MODE_KW);
+        }
         if (len == 9 && memcmp(l->start, "#autoFree", 9) == 0) {
             return make_token(l, TOKEN_AUTOFREE_KW);
         }

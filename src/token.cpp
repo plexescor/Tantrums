@@ -76,6 +76,10 @@ const char* token_type_name(TokenType type) {
         case TOKEN_VOID:          return "void";
         case TOKEN_EOF:           return "EOF";
         case TOKEN_ERROR:         return "ERROR";
+        case TOKEN_SWITCH:        return "switch";
+        case TOKEN_CASE:          return "case";
+        case TOKEN_DEFAULT:       return "default";
+        case TOKEN_SWITCH_BREAK_MODE_KW: return "#switchBreakMode";
     }
     return "?";
 }

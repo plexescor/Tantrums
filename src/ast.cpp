@@ -127,6 +127,16 @@ void ast_free(ASTNode* node) {
         ast_free(node->as.try_catch.catch_body);
         if (node->as.try_catch.err_var) free(node->as.try_catch.err_var);
         break;
+    case NODE_SWITCH:
+        ast_free(node->as.switch_stmt.subject);
+        for (int i = 0; i < node->as.switch_stmt.case_count; i++) {
+            if (node->as.switch_stmt.case_values[i])
+                ast_free(node->as.switch_stmt.case_values[i]);
+            ast_free(node->as.switch_stmt.case_bodies[i]);
+        }
+        free(node->as.switch_stmt.case_values);
+        free(node->as.switch_stmt.case_bodies);
+        break;
     case NODE_PROGRAM:
         for (int i = 0; i < node->as.program.count; i++)
             ast_free(node->as.program.nodes[i]);

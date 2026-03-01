@@ -1566,6 +1566,178 @@ static void compile_node(ASTNode* node) {
         emit_byte(node->line, OP_FREE);
         break;
 
+    case NODE_SWITCH: {
+        /*
+         * Unified layout for both break modes:
+         *
+         * For EACH non-default case (in order):
+         *   GET_LOCAL $sw
+         *   [case_value]
+         *   OP_EQ
+         *   OP_JUMP_IF_FALSE → skip_label   (false: skip body, go to next case compare)
+         *   OP_POP                           (true: pop the true, run body)
+         *   [body]
+         *   if break_mode false:  OP_JUMP → after_switch  (auto-break)
+         *   if break_mode true:   (nothing — fall through to next body)
+         *   skip_label:
+         *   OP_POP                           (pop the false, try next case)
+         *
+         * After all non-default cases:
+         *   [default body]  (runs only if all comparisons failed, i.e. we reach here)
+         *
+         * after_switch:
+         *   (break jumps land here too)
+         *
+         * NOTE for break_mode true: break inside a case body jumps to after_switch.
+         * Without break, code falls off the end of one body into the next body's code
+         * (since no OP_JUMP separates them). Default at the end means if nothing matched,
+         * we fall through all the comparison chains and land at default.
+         *
+         * IMPORTANT: default is ALWAYS put last regardless of where the user wrote it.
+         * This matches the behaviour in C/Java/etc. — default is the fallback when nothing
+         * matches, not a positional case.
+         */
+
+        bool bmode  = node->as.switch_stmt.break_mode;
+        int  n_cases = node->as.switch_stmt.case_count;
+        int  def_idx = node->as.switch_stmt.default_idx;
+
+        /* Evaluate subject once, store in hidden local */
+        compile_expr(node->as.switch_stmt.subject);
+        begin_scope();
+        int sw_slot = add_local("$sw", 3);
+
+        /* Hook up break support using Loop infrastructure */
+        Loop sw_loop;
+        sw_loop.enclosing   = current_loop;
+        sw_loop.start       = -1;
+        sw_loop.scope_depth = current->scope_depth;
+        sw_loop.type        = 0;
+        sw_loop.break_count    = 0;
+        sw_loop.continue_count = 0;
+        current_loop = &sw_loop;
+
+        /* end_jumps: for auto-break mode, each case body ends with OP_JUMP to after_switch */
+        int end_jumps[256];
+        int end_jump_count = 0;
+
+        if (!bmode) {
+            /* == AUTO-BREAK MODE (bmode false) ==
+             * Each matched case runs its body then jumps to after_switch. */
+            for (int i = 0; i < n_cases; i++) {
+                if (i == def_idx) continue;
+
+                emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)sw_slot);
+                compile_expr(node->as.switch_stmt.case_values[i]);
+                emit_byte(node->line, OP_EQ);
+
+                int skip = emit_jump(node->line, OP_JUMP_IF_FALSE);
+                emit_byte(node->line, OP_POP); /* pop true */
+
+                ASTNode* body = node->as.switch_stmt.case_bodies[i];
+                int locals_before = current->local_count;
+                if (body->type == NODE_BLOCK) {
+                    for (int j = 0; j < body->as.block.count; j++)
+                        compile_node(body->as.block.nodes[j]);
+                } else {
+                    compile_node(body);
+                }
+                int added = current->local_count - locals_before;
+                for (int k = 0; k < added; k++) emit_byte(node->line, OP_POP);
+                current->local_count = locals_before;
+
+                if (end_jump_count < 256)
+                    end_jumps[end_jump_count++] = emit_jump(node->line, OP_JUMP);
+
+                patch_jump(skip);
+                emit_byte(node->line, OP_POP); /* pop false */
+            }
+        } else {
+            /* == FALLTHROUGH MODE (bmode true) ==
+             * Once a case matches, run that body AND all subsequent bodies.
+             *
+             * Layout:
+             *   [compare chain] each match emits OP_JUMP -> body_entry_N
+             *   OP_JUMP -> no_match   (all misses skip all bodies)
+             *   body_entry_0: [body 0]  <- falls through naturally into body 1, 2...
+             *   body_entry_1: [body 1]
+             *   ...
+             *   no_match:             (default follows here)
+             */
+
+            int real_cases[256];
+            int real_count = 0;
+            for (int i = 0; i < n_cases; i++) {
+                if (i != def_idx) real_cases[real_count++] = i;
+            }
+
+            int match_jumps[256]; /* OP_JUMP -> body_entry_N per case */
+
+            /* Emit compare chain */
+            for (int ci = 0; ci < real_count; ci++) {
+                int i = real_cases[ci];
+                emit_bytes(node->line, OP_GET_LOCAL, (uint8_t)sw_slot);
+                compile_expr(node->as.switch_stmt.case_values[i]);
+                emit_byte(node->line, OP_EQ);
+
+                int skip = emit_jump(node->line, OP_JUMP_IF_FALSE);
+                emit_byte(node->line, OP_POP); /* pop true */
+
+                match_jumps[ci] = emit_jump(node->line, OP_JUMP); /* -> body_entry */
+
+                patch_jump(skip);
+                emit_byte(node->line, OP_POP); /* pop false, try next */
+            }
+
+            /* No match at all -> jump past all bodies to default/after_switch */
+            int no_match_jump = emit_jump(node->line, OP_JUMP);
+
+            /* Emit bodies sequentially - natural fallthrough between them */
+            for (int ci = 0; ci < real_count; ci++) {
+                int i = real_cases[ci];
+                patch_jump(match_jumps[ci]); /* body entry point */
+
+                ASTNode* body = node->as.switch_stmt.case_bodies[i];
+                int locals_before = current->local_count;
+                if (body->type == NODE_BLOCK) {
+                    for (int j = 0; j < body->as.block.count; j++)
+                        compile_node(body->as.block.nodes[j]);
+                } else {
+                    compile_node(body);
+                }
+                int added = current->local_count - locals_before;
+                for (int k = 0; k < added; k++) emit_byte(node->line, OP_POP);
+                current->local_count = locals_before;
+                /* No jump - falls into next body naturally */
+            }
+
+            /* Patch no_match jump to here (default or after_switch) */
+            patch_jump(no_match_jump);
+        }
+
+        /* Default block — runs only if we fell through all comparisons */
+        if (def_idx != -1) {
+            ASTNode* body = node->as.switch_stmt.case_bodies[def_idx];
+            int locals_before = current->local_count;
+            if (body->type == NODE_BLOCK) {
+                for (int j = 0; j < body->as.block.count; j++)
+                    compile_node(body->as.block.nodes[j]);
+            } else {
+                compile_node(body);
+            }
+            int added = current->local_count - locals_before;
+            for (int k = 0; k < added; k++) emit_byte(node->line, OP_POP);
+            current->local_count = locals_before;
+        }
+
+        /* Patch all auto-break end jumps and explicit break jumps to here */
+        for (int i = 0; i < end_jump_count; i++)      patch_jump(end_jumps[i]);
+        for (int i = 0; i < sw_loop.break_count; i++) patch_jump(sw_loop.breaks[i]);
+
+        current_loop = sw_loop.enclosing;
+        end_scope(node->line);
+    } break;
+
     case NODE_BREAK: {
         if (current_loop == nullptr) {
             type_error(node->line, "'break' used outside of loop.");
