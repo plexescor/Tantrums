@@ -138,6 +138,22 @@ static void prescan_signatures(ASTNode* program) {
     }
 }
 
+static void prescan_directives(ASTNode* program) {
+    if (program->type != NODE_PROGRAM) return;
+    for (int i = 0; i < program->as.program.count; i++) {
+        ASTNode* n = program->as.program.nodes[i];
+        if (n->type == NODE_AUTOFREE) {
+            compile_autofree_enabled = n->as.autofree.enabled;
+            extern bool global_autofree;
+            global_autofree = compile_autofree_enabled;
+        }
+        if (n->type == NODE_ALLOW_LEAKS) {
+            compile_allow_leaks_enabled = n->as.allow_leaks.enabled;
+            global_allow_leaks = compile_allow_leaks_enabled;
+        }
+    }
+}
+
 /* ── Type inference (returns type name or nullptr for dynamic) ── */
 static const char* infer_expr_type(ASTNode* node) {
     if (!node) return nullptr;
@@ -1748,6 +1764,9 @@ ObjFunction* compiler_compile(ASTNode* program, CompileMode mode) {
 
     /* Pre-scan to collect function signatures for type checking */
     prescan_signatures(program);
+    /* Pre-scan directives so they apply from the very first allocation,
+       not mid-walk when the NODE_AUTOFREE statement is reached */
+    prescan_directives(program);
     if (!find_func_sig("main")) {
         fprintf(stderr, "Error: No 'main' function found. Every Tantrums program must define a 'main' function.\n");
         return nullptr;

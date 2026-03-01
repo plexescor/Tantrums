@@ -37,7 +37,7 @@ static void vm_exit_scope(VM* vm) {
             Obj* next_node = o->next;
             if (o->type == OBJ_POINTER) {
                 ObjPointer* p = (ObjPointer*)o;
-                if (p->auto_manage && p->is_valid && p->target && !p->escaped && p->scope_depth > vm->scope_depth) {
+                if (p->auto_manage && global_autofree && p->is_valid && p->target && !p->escaped && p->scope_depth > vm->scope_depth) {
                     extern bool suppress_autofree_notes;
                     if (!suppress_autofree_notes) {
 
@@ -87,7 +87,7 @@ static void vm_exit_scope(VM* vm) {
             /* Runtime auto-free for non-escaped local lists */
             if (o->type == OBJ_LIST) {
                 ObjList* lst = (ObjList*)o;
-                if (lst->auto_manage && !lst->escaped && lst->scope_depth > vm->scope_depth) {
+                if (lst->auto_manage && global_autofree && !lst->escaped && lst->scope_depth > vm->scope_depth) {
                     if (lst->items) {
                         free(lst->items);
                         lst->items = nullptr;
@@ -105,7 +105,7 @@ static void vm_exit_scope(VM* vm) {
             /* Runtime auto-free for non-escaped local maps */
             if (o->type == OBJ_MAP) {
                 ObjMap* mp = (ObjMap*)o;
-                if (mp->auto_manage && !mp->escaped && mp->scope_depth > vm->scope_depth) {
+                if (mp->auto_manage && global_autofree && !mp->escaped && mp->scope_depth > vm->scope_depth) {
                     if (mp->entries) {
                         free(mp->entries);
                         mp->entries = nullptr;
