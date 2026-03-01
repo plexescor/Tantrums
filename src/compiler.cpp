@@ -190,6 +190,23 @@ static const char* infer_expr_type(ASTNode* node) {
     }
     case NODE_UNARY:
         if (node->as.unary.op == TOKEN_BANG) return "bool";
+        if (node->as.unary.op == TOKEN_STAR) {
+            /* Dereference: *p where p is int* → returns int */
+            const char* inner = infer_expr_type(node->as.unary.operand);
+            if (inner && strchr(inner, '*')) {
+                /* Strip the last '*' to get the base type */
+                static char deref_buf[32];
+                strncpy(deref_buf, inner, 31);
+                deref_buf[31] = '\0';
+                char* star = strrchr(deref_buf, '*');
+                if (star) *star = '\0';
+                /* Trim trailing space if any e.g. "int *" → "int " → "int" */
+                int len = (int)strlen(deref_buf);
+                while (len > 0 && deref_buf[len-1] == ' ') deref_buf[--len] = '\0';
+                return deref_buf[0] ? deref_buf : nullptr;
+            }
+            return nullptr;
+        }
         return infer_expr_type(node->as.unary.operand);
     default: return nullptr;
     }
@@ -203,11 +220,47 @@ static bool is_pointer_type(const char* type) {
 static bool types_compatible(const char* expected, const char* actual) {
     if (!expected || !expected[0] || !actual) return true; /* dynamic = always OK */
     if (strcmp(expected, actual) == 0) return true;
-    /* int and float are promotable */
-    if (strcmp(expected, "float") == 0 && strcmp(actual, "int") == 0) return true;
-    /* null is compatible with any pointer or dynamic */
-    if (strcmp(actual, "null") == 0 && (is_pointer_type(expected) || !expected[0])) return true;
+    /* int and float are promotable (only for non-pointer types) */
+    if (!is_pointer_type(expected) && !is_pointer_type(actual)) {
+        if (strcmp(expected, "float") == 0 && strcmp(actual, "int") == 0) return true;
+    }
+    /* null is compatible with any pointer */
+    if (strcmp(actual, "null") == 0 && is_pointer_type(expected)) return true;
+    /* pointer types must match exactly — int* is NOT compatible with float* */
+    if (is_pointer_type(expected) && is_pointer_type(actual)) return strcmp(expected, actual) == 0;
+    /* pointer vs non-pointer is never compatible */
+    if (is_pointer_type(expected) != is_pointer_type(actual)) return false;
     return false;
+}
+
+/* Strip trailing * from a pointer type to get the base type: "int*" -> "int", "float*" -> "float" */
+static const char* pointer_base_type(const char* ptr_type) {
+    if (!ptr_type) return nullptr;
+    static char base_buf[32];
+    strncpy(base_buf, ptr_type, 31);
+    base_buf[31] = '\0';
+    char* star = strrchr(base_buf, '*');
+    if (star) *star = '\0';
+    int len = (int)strlen(base_buf);
+    while (len > 0 && base_buf[len-1] == ' ') base_buf[--len] = '\0';
+    return base_buf[0] ? base_buf : nullptr;
+}
+
+/* Check that the value stored in an alloc matches the pointer's base type */
+static void check_alloc_type(int line, const char* declared_ptr_type, ASTNode* init_node) {
+    if (!declared_ptr_type || !is_pointer_type(declared_ptr_type)) return;
+    if (!init_node) return;
+    const char* base = pointer_base_type(declared_ptr_type);
+    if (!base) return;
+    const char* init_type = infer_expr_type(init_node);
+    if (!init_type) return; /* dynamic, allow */
+    if (!types_compatible(base, init_type)) {
+        char buf[512];
+        snprintf(buf, sizeof(buf),
+                 "Cannot store '%s' value in pointer of type '%s' (expected '%s' value).",
+                 init_type, declared_ptr_type, base);
+        type_error(line, buf);
+    }
 }
 
 static void type_error(int line, const char* msg) {
@@ -215,7 +268,6 @@ static void type_error(int line, const char* msg) {
     had_type_error = true;
 }
 
-/* Check if function is a builtin */
 static bool is_builtin(const char* fn_name) {
     return strcmp(fn_name, "print") == 0 || strcmp(fn_name, "input") == 0 ||
            strcmp(fn_name, "len") == 0 || strcmp(fn_name, "range") == 0 ||
@@ -550,6 +602,8 @@ static void compile_expr(ASTNode* node) {
         break;
 
     case NODE_ALLOC: {
+        /* Type-check: if declared variable is e.g. int*, the init value must be int-compatible */
+        /* We check this in NODE_VAR_DECL, but also catch bare alloc expressions here */
         compile_expr(node->as.alloc_expr.init);
         emit_byte(node->line, OP_ALLOC);
         const char* type_name = node->as.alloc_expr.type_name ? node->as.alloc_expr.type_name : "dynamic";
@@ -643,6 +697,22 @@ static void compile_expr(ASTNode* node) {
                 }
             }
             if (node->as.assign.value && node->as.assign.value->type == NODE_ALLOC) {
+                /* Check alloc stored-value type matches declared pointer base type */
+                if (current->locals[slot].type_name[0] && is_pointer_type(current->locals[slot].type_name)) {
+                    ASTNode* alloc_init = node->as.assign.value->as.alloc_expr.init;
+                    check_alloc_type(node->line, current->locals[slot].type_name, alloc_init);
+                    const char* alloc_type = node->as.assign.value->as.alloc_expr.type_name;
+                    if (alloc_type && alloc_type[0]) {
+                        const char* base = pointer_base_type(current->locals[slot].type_name);
+                        if (base && strcmp(alloc_type, base) != 0 && !types_compatible(base, alloc_type)) {
+                            char buf[512];
+                            snprintf(buf, sizeof(buf),
+                                     "Type mismatch: '%s' is '%s' but alloc specifies type '%s'.",
+                                     node->as.assign.name, current->locals[slot].type_name, alloc_type);
+                            type_error(node->line, buf);
+                        }
+                    }
+                }
                 current->locals[slot].holds_alloc = true;
             } else if (node->as.assign.value && node->as.assign.value->type == NODE_CALL &&
                        node->as.assign.value->as.call.callee->type == NODE_IDENTIFIER) {
@@ -980,6 +1050,34 @@ static void compile_node(ASTNode* node) {
                              init_type, node->as.var_decl.type_name, node->as.var_decl.name);
                     type_error(node->line, buf);
                 }
+            } else {
+                /* alloc init: check the stored value type matches the pointer's base type */
+                /* e.g. int* p = alloc int(42) is OK, int* p = alloc float(3.14) is an error */
+                ASTNode* alloc_init = node->as.var_decl.init->as.alloc_expr.init;
+                check_alloc_type(node->line, node->as.var_decl.type_name, alloc_init);
+
+                /* Also verify the alloc's own type_name matches the declared pointer type */
+                /* e.g. int* p = alloc float(3.14) — alloc_type is "float", decl is "int*" */
+                const char* alloc_type = node->as.var_decl.init->as.alloc_expr.type_name;
+                if (alloc_type && alloc_type[0] && is_pointer_type(node->as.var_decl.type_name)) {
+                    const char* base = pointer_base_type(node->as.var_decl.type_name);
+                    if (base && strcmp(alloc_type, base) != 0 && !types_compatible(base, alloc_type)) {
+                        char buf[512];
+                        snprintf(buf, sizeof(buf),
+                                 "Type mismatch: '%s' declared as '%s' but alloc specifies type '%s'.",
+                                 node->as.var_decl.name, node->as.var_decl.type_name, alloc_type);
+                        type_error(node->line, buf);
+                    }
+                }
+
+                /* Non-pointer variable cannot be assigned an alloc result */
+                if (!is_pointer_type(node->as.var_decl.type_name)) {
+                    char buf[512];
+                    snprintf(buf, sizeof(buf),
+                             "Cannot assign alloc result to non-pointer variable '%s' of type '%s'. Use a pointer type (e.g. '%s*').",
+                             node->as.var_decl.name, node->as.var_decl.type_name, node->as.var_decl.type_name);
+                    type_error(node->line, buf);
+                }
             }
         }
 
@@ -1001,6 +1099,9 @@ static void compile_node(ASTNode* node) {
                 } else if (strcmp(node->as.var_decl.type_name, "string") == 0) {
                     ObjString* empty_str = obj_string_new("", 0);
                     emit_constant(node->line, OBJ_VAL(empty_str));
+                } else if (is_pointer_type(node->as.var_decl.type_name)) {
+                    /* pointer types default to null */
+                    emit_byte(node->line, OP_NULL);
                 } else {
                     emit_byte(node->line, OP_NULL);
                 }
@@ -1009,8 +1110,10 @@ static void compile_node(ASTNode* node) {
             }
         }
 
-        /* Auto-cast if type annotation present */
-        if (node->as.var_decl.type_name && (!node->as.var_decl.init || node->as.var_decl.init->type != NODE_ALLOC)) {
+        /* Auto-cast if type annotation present — skip for pointer types and alloc inits */
+        if (node->as.var_decl.type_name &&
+            !is_pointer_type(node->as.var_decl.type_name) &&
+            (!node->as.var_decl.init || node->as.var_decl.init->type != NODE_ALLOC)) {
             uint8_t cast_tag = 255;
             if (strcmp(node->as.var_decl.type_name, "int") == 0)    cast_tag = 0;
             if (strcmp(node->as.var_decl.type_name, "float") == 0)  cast_tag = 1;
@@ -1354,11 +1457,19 @@ static void compile_node(ASTNode* node) {
             const char* actual = infer_expr_type(node->as.child);
             
             if (is_pointer_type(current->ret_type)) {
-                if (!is_pointer_type(actual) && strcmp(actual, "null") != 0) {
-                    char buf[512];
-                    snprintf(buf, sizeof(buf), "function '%s' declared '%s' but returns non-pointer.", 
-                             (const char*)current->function->name->chars, current->ret_type);
-                    type_error(node->line, buf);
+                /* Function returns a pointer type — actual must match exactly or be null */
+                if (actual && strcmp(actual, "null") != 0) {
+                    if (!is_pointer_type(actual)) {
+                        char buf[512];
+                        snprintf(buf, sizeof(buf), "function '%s' declared '%s' but returns non-pointer '%s'.",
+                                 (const char*)current->function->name->chars, current->ret_type, actual);
+                        type_error(node->line, buf);
+                    } else if (strcmp(actual, current->ret_type) != 0) {
+                        char buf[512];
+                        snprintf(buf, sizeof(buf), "function '%s' declared '%s' but returns '%s' (pointer type mismatch).",
+                                 (const char*)current->function->name->chars, current->ret_type, actual);
+                        type_error(node->line, buf);
+                    }
                 }
             } else if (is_pointer_type(actual)) {
                 /* Returning pointer from non-pointer return type -> Warning */

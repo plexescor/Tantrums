@@ -810,13 +810,16 @@ static InterpretResult run(VM* vm) {
         case OP_PTR_DEREF: {
             Value v = vm_pop(vm);
             if (!IS_POINTER(v)) {
-                if (!vm_runtime_error(vm, "Cannot dereference a non-pointer."))
+                if (!vm_runtime_error(vm, "Cannot dereference a non-pointer (got %s).", value_type_name(v)))
                     return INTERPRET_RUNTIME_ERROR;
+                break;
             }
             ObjPointer* p = AS_POINTER(v);
             if (!p->is_valid || !p->target) {
-                if (!vm_runtime_error(vm, "Null pointer dereference!"))
+                const char* type_name = p->alloc_type ? p->alloc_type->chars : "dynamic";
+                if (!vm_runtime_error(vm, "Null pointer dereference on %s* pointer!", type_name))
                     return INTERPRET_RUNTIME_ERROR;
+                break;
             }
             vm_push(vm, *p->target);
         } break;
