@@ -211,6 +211,11 @@ static Token scan_token(Lexer* l) {
         if (len == 17 && memcmp(l->start, "#allowMemoryLeaks", 17) == 0) {
             return make_token(l, TOKEN_ALLOW_LEAKS_KW);
         }
+        /* #mode is pre-stripped by main.cpp before lexing, but handle gracefully in case */
+        if (len == 5 && memcmp(l->start, "#mode", 5) == 0) {
+            while (!is_at_end(l) && peek(l) != '\n') advance(l);
+            return scan_token(l);
+        }
         return error_token(l, "Unknown directive.");
     }
     }

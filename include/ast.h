@@ -29,6 +29,9 @@ typedef struct { ASTNode** nodes; int count; int capacity; } NodeList;
 struct ASTNode {
     NodeType type;
     int      line;
+    int      node_mode;        /* -1 = inherit, else CompileMode value */
+    int      node_autofree;    /* -1 = inherit, 0 = false, 1 = true   */
+    int      node_allow_leaks; /* -1 = inherit, 0 = false, 1 = true   */
     union {
         int64_t int_literal;                                          /* INT_LIT   */
         double  float_literal;                                        /* FLOAT_LIT */

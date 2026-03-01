@@ -4,6 +4,9 @@ ASTNode* ast_new(NodeType type, int line) {
     ASTNode* node = (ASTNode*)calloc(1, sizeof(ASTNode));
     node->type = type;
     node->line = line;
+    node->node_mode        = -1; /* inherit */
+    node->node_autofree    = -1; /* inherit */
+    node->node_allow_leaks = -1; /* inherit */
     return node;
 }
 

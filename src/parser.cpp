@@ -639,18 +639,31 @@ static ASTNode* declaration(Parser* p) {
     /* use filename.42AHH; */
     if (match(p, TOKEN_USE)) {
         int line = previous(p)->line;
-        /* Read all tokens until semicolon and concatenate to form filename */
-        const char* start = peek_tok(p)->start;
-        const char* end = start;
-        while (!check(p, TOKEN_SEMICOLON) && !is_at_end(p)) {
-            Token* t = advance_tok(p);
-            end = t->start + t->length;
-        }
-        int len = (int)(end - start);
         ASTNode* n = ast_new(NODE_USE, line);
-        n->as.use_file = (char*)malloc(len + 1);
-        memcpy(n->as.use_file, start, len);
-        n->as.use_file[len] = '\0';
+
+        if (check(p, TOKEN_STRING_LITERAL)) {
+            /* Quoted form: use "path/to/file.42AHH"; — preferred, supports relative paths */
+            Token* t = advance_tok(p);
+            const char* inner = t->start + 1; /* skip opening quote */
+            int len = t->length - 2;          /* strip both quotes */
+            if (len < 0) len = 0;
+            n->as.use_file = (char*)malloc(len + 1);
+            memcpy(n->as.use_file, inner, len);
+            n->as.use_file[len] = '\0';
+        } else {
+            /* Legacy bare form: use filename.42AHH; */
+            const char* start = peek_tok(p)->start;
+            const char* end = start;
+            while (!check(p, TOKEN_SEMICOLON) && !is_at_end(p)) {
+                Token* t = advance_tok(p);
+                end = t->start + t->length;
+            }
+            int len = (int)(end - start);
+            n->as.use_file = (char*)malloc(len + 1);
+            memcpy(n->as.use_file, start, len);
+            n->as.use_file[len] = '\0';
+        }
+
         consume(p, TOKEN_SEMICOLON, "Expected ';' after use statement.");
         return n;
     }

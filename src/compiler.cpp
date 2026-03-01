@@ -105,8 +105,11 @@ static void prescan_signatures(ASTNode* program) {
     for (int i = 0; i < program->as.program.count; i++) {
         ASTNode* n = program->as.program.nodes[i];
         if (n->type == NODE_FUNC_DECL) {
+            /* Use this node's own mode if set, otherwise global */
+            CompileMode eff_mode = (n->node_mode >= 0) ? (CompileMode)n->node_mode : compile_mode;
+
             /* RULE 1: Every function must declare a return type in static mode (except main) */
-            if (compile_mode == MODE_STATIC && !n->as.func_decl.ret_type && strcmp(n->as.func_decl.name, "main") != 0) {
+            if (eff_mode == MODE_STATIC && !n->as.func_decl.ret_type && strcmp(n->as.func_decl.name, "main") != 0) {
                 char buf[512];
                 snprintf(buf, sizeof(buf), "function '%s' in static mode must declare a return type.", n->as.func_decl.name);
                 type_error(n->line, buf);
@@ -118,7 +121,7 @@ static void prescan_signatures(ASTNode* program) {
                 had_type_error = true;
             }
             /* STATIC: all params must have type annotations (except main) */
-            if (compile_mode == MODE_STATIC && strcmp(n->as.func_decl.name, "main") != 0) {
+            if (eff_mode == MODE_STATIC && strcmp(n->as.func_decl.name, "main") != 0) {
                 for (int p = 0; p < n->as.func_decl.param_count; p++) {
                     if (!n->as.func_decl.params[p].type_name || n->as.func_decl.params[p].type_name[0] == '\0') {
                         char buf[512];
@@ -1463,6 +1466,25 @@ static void compile_node(ASTNode* node) {
     case NODE_PROGRAM:
         for (int i = 0; i < node->as.program.count; i++) {
             ASTNode* n = node->as.program.nodes[i];
+
+            /* Swap compile_mode and memory directives if this node came from a
+             * file with its own per-file directives */
+            CompileMode saved_mode        = compile_mode;
+            bool        saved_autofree    = compile_autofree_enabled;
+            bool        saved_allow_leaks = compile_allow_leaks_enabled;
+
+            if (n->node_mode >= 0)
+                compile_mode = (CompileMode)n->node_mode;
+            if (n->node_autofree >= 0) {
+                compile_autofree_enabled = (n->node_autofree == 1);
+                extern bool global_autofree;
+                global_autofree = compile_autofree_enabled;
+            }
+            if (n->node_allow_leaks >= 0) {
+                compile_allow_leaks_enabled = (n->node_allow_leaks == 1);
+                global_allow_leaks = compile_allow_leaks_enabled;
+            }
+
             switch (n->type) {
             case NODE_VAR_DECL:
             case NODE_FUNC_DECL:
@@ -1480,6 +1502,14 @@ static void compile_node(ASTNode* node) {
                 had_type_error = true;
                 break;
             }
+
+            /* Restore main file's settings */
+            compile_mode              = saved_mode;
+            compile_autofree_enabled  = saved_autofree;
+            compile_allow_leaks_enabled = saved_allow_leaks;
+            extern bool global_autofree;
+            global_autofree    = compile_autofree_enabled;
+            global_allow_leaks = compile_allow_leaks_enabled;
         }
         break;
 
