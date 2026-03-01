@@ -52,6 +52,7 @@ typedef enum {
     OP_EXIT_SCOPE,
     OP_MARK_ESCAPED,
     OP_FOR_IN_STEP, /* fused loop step for performance */
+    OP_FREE_COLLECTION, /* auto-free a local list or map that didn't escape */
     OP_HALT,
 } OpCode;
 

@@ -114,6 +114,7 @@ ObjString* obj_string_concat(ObjString* a, ObjString* b) {
 ObjList* obj_list_new(void) {
     ObjList* l = (ObjList*)allocate_obj(sizeof(ObjList), OBJ_LIST);
     l->items = nullptr; l->count = 0; l->capacity = 0;
+    l->escaped = false; l->scope_depth = 0; l->auto_manage = false;
     return l;
 }
 
@@ -141,6 +142,7 @@ void obj_list_append(ObjList* l, Value v) {
 ObjMap* obj_map_new(void) {
     ObjMap* m = (ObjMap*)allocate_obj(sizeof(ObjMap), OBJ_MAP);
     m->entries = nullptr; m->count = 0; m->capacity = 0;
+    m->escaped = false; m->scope_depth = 0; m->auto_manage = false;
     return m;
 }
 

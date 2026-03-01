@@ -84,6 +84,42 @@ static void vm_exit_scope(VM* vm) {
                     continue; /* Do not advance prev since current was removed */
                 }
             }
+            /* Runtime auto-free for non-escaped local lists */
+            if (o->type == OBJ_LIST) {
+                ObjList* lst = (ObjList*)o;
+                if (lst->auto_manage && !lst->escaped && lst->scope_depth > vm->scope_depth) {
+                    if (lst->items) {
+                        free(lst->items);
+                        lst->items = nullptr;
+                        lst->count = 0;
+                        lst->capacity = 0;
+                    }
+                    if (prev == nullptr) all_objects = next_node;
+                    else prev->next = next_node;
+                    extern void* tantrums_realloc(void* pointer, size_t oldSize, size_t newSize);
+                    tantrums_realloc(o, sizeof(ObjList), 0);
+                    o = next_node;
+                    continue;
+                }
+            }
+            /* Runtime auto-free for non-escaped local maps */
+            if (o->type == OBJ_MAP) {
+                ObjMap* mp = (ObjMap*)o;
+                if (mp->auto_manage && !mp->escaped && mp->scope_depth > vm->scope_depth) {
+                    if (mp->entries) {
+                        free(mp->entries);
+                        mp->entries = nullptr;
+                        mp->count = 0;
+                        mp->capacity = 0;
+                    }
+                    if (prev == nullptr) all_objects = next_node;
+                    else prev->next = next_node;
+                    extern void* tantrums_realloc(void* pointer, size_t oldSize, size_t newSize);
+                    tantrums_realloc(o, sizeof(ObjMap), 0);
+                    o = next_node;
+                    continue;
+                }
+            }
             prev = o;
             o = next_node;
         }
@@ -474,6 +510,22 @@ static InterpretResult run(VM* vm) {
                     }
                 }
             }
+            if (IS_LIST(val)) {
+                if (vm->scope_depth > 0 && vm->scope_base_slots[vm->scope_depth]) {
+                    Value* slot_ptr = &frame->slots[slot];
+                    if (slot_ptr < vm->scope_base_slots[vm->scope_depth]) {
+                        AS_LIST(val)->escaped = true;
+                    }
+                }
+            }
+            if (IS_MAP(val)) {
+                if (vm->scope_depth > 0 && vm->scope_base_slots[vm->scope_depth]) {
+                    Value* slot_ptr = &frame->slots[slot];
+                    if (slot_ptr < vm->scope_base_slots[vm->scope_depth]) {
+                        AS_MAP(val)->escaped = true;
+                    }
+                }
+            }
             frame->slots[slot] = val; 
         } break;
         case OP_GET_GLOBAL: {
@@ -490,12 +542,16 @@ static InterpretResult run(VM* vm) {
             ObjString* name = AS_STRING(READ_CONSTANT());
             Value val = vm_peek(vm, 0);
             if (IS_POINTER(val)) AS_POINTER(val)->escaped = true;
+            if (IS_LIST(val)) AS_LIST(val)->escaped = true;
+            if (IS_MAP(val)) AS_MAP(val)->escaped = true;
             table_set(&vm->globals, name, val);
         } break;
         case OP_DEFINE_GLOBAL: {
             ObjString* name = AS_STRING(READ_CONSTANT());
             Value val = vm_peek(vm, 0);
             if (IS_POINTER(val)) AS_POINTER(val)->escaped = true;
+            if (IS_LIST(val)) AS_LIST(val)->escaped = true;
+            if (IS_MAP(val)) AS_MAP(val)->escaped = true;
             table_set(&vm->globals, name, val);
             vm_pop(vm);
         } break;
@@ -528,6 +584,8 @@ static InterpretResult run(VM* vm) {
             for (int i = 0; i < argc; i++) {
                 Value arg = vm_peek(vm, i);
                 if (IS_POINTER(arg)) AS_POINTER(arg)->escaped = true;
+                if (IS_LIST(arg))    AS_LIST(arg)->escaped = true;
+                if (IS_MAP(arg))     AS_MAP(arg)->escaped = true;
             }
             if (!call_value(vm, callee, argc)) return INTERPRET_RUNTIME_ERROR;
             frame = &vm->frames[vm->frame_count - 1];
@@ -536,6 +594,8 @@ static InterpretResult run(VM* vm) {
         case OP_RETURN: {
             Value result = vm_pop(vm);
             if (IS_POINTER(result)) AS_POINTER(result)->escaped = true;
+            if (IS_LIST(result))    AS_LIST(result)->escaped = true;
+            if (IS_MAP(result))     AS_MAP(result)->escaped = true;
             int restore_depth = frame->saved_scope_depth;
             
             /* Unwind all scopes created within this function */
@@ -558,6 +618,9 @@ static InterpretResult run(VM* vm) {
             for (int i = count - 1; i >= 0; i--)
                 obj_list_append(list, vm_peek(vm, i));
             list->obj.is_manual = false;
+            list->scope_depth = vm->scope_depth;
+            list->auto_manage = global_autofree;
+            list->escaped = false;
             vm->stack_top -= count;
             vm_push(vm, OBJ_VAL(list));
         } break;
@@ -572,6 +635,9 @@ static InterpretResult run(VM* vm) {
                 obj_map_set(map, key, val);
             }
             map->obj.is_manual = false;
+            map->scope_depth = vm->scope_depth;
+            map->auto_manage = global_autofree;
+            map->escaped = false;
             vm->stack_top -= count * 2;
             vm_push(vm, OBJ_VAL(map));
         } break;
@@ -630,6 +696,8 @@ static InterpretResult run(VM* vm) {
             Value idx = vm_peek(vm, 1);
             Value obj = vm_peek(vm, 2);
             if (IS_POINTER(val)) AS_POINTER(val)->escaped = true;
+            if (IS_LIST(val))    AS_LIST(val)->escaped = true;
+            if (IS_MAP(val))     AS_MAP(val)->escaped = true;
             if (IS_LIST(obj) && IS_INT(idx)) {
                 ObjList* l = AS_LIST(obj);
                 int i = (int)AS_INT(idx);
@@ -932,6 +1000,51 @@ static InterpretResult run(VM* vm) {
             }
             break;
         }
+
+        case OP_FREE_COLLECTION: {
+            /* Compile-time confirmed non-escaping list/map — free its heap buffer silently */
+            Value v = vm_pop(vm);
+            if (IS_LIST(v)) {
+                ObjList* lst = AS_LIST(v);
+                if (lst->items) {
+                    free(lst->items);
+                    lst->items = nullptr;
+                    lst->count = 0;
+                    lst->capacity = 0;
+                }
+                /* Unlink from all_objects */
+                extern Obj* all_objects;
+                Obj* o = all_objects; Obj* prev = nullptr;
+                while (o) {
+                    if (o == (Obj*)lst) {
+                        if (prev == nullptr) all_objects = o->next;
+                        else prev->next = o->next;
+                        tantrums_realloc(o, sizeof(ObjList), 0);
+                        break;
+                    }
+                    prev = o; o = o->next;
+                }
+            } else if (IS_MAP(v)) {
+                ObjMap* mp = AS_MAP(v);
+                if (mp->entries) {
+                    free(mp->entries);
+                    mp->entries = nullptr;
+                    mp->count = 0;
+                    mp->capacity = 0;
+                }
+                extern Obj* all_objects;
+                Obj* o = all_objects; Obj* prev = nullptr;
+                while (o) {
+                    if (o == (Obj*)mp) {
+                        if (prev == nullptr) all_objects = o->next;
+                        else prev->next = o->next;
+                        tantrums_realloc(o, sizeof(ObjMap), 0);
+                        break;
+                    }
+                    prev = o; o = o->next;
+                }
+            }
+        } break;
 
         case OP_HALT: {
             while (vm->scope_depth > 0) vm_exit_scope(vm);

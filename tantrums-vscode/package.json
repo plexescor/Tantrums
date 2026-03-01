@@ -3,7 +3,7 @@
     "displayName": "Tantrums Language",
     "description": "Full language support for Tantrums (.42AHH) — syntax highlighting, IntelliSense, diagnostics, hover docs, and commands",
     "version": "0.2.0",
-    "publisher": "tantrums-dev",
+    "publisher": "plexescor",
     "engines": {
         "vscode": "^1.75.0"
     },

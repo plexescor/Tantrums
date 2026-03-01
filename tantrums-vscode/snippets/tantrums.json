@@ -273,5 +273,68 @@
         "prefix": "bytesToGB",
         "body": "bytesToGB(${1:bytes})",
         "description": "Converts raw bytes to Gigabytes"
+    },
+    "Tantrums: Pointer Function": {
+        "prefix": "tantrumptr",
+        "body": [
+            "tantrum ${1:type}* ${2:name}(${3:args})",
+            "{",
+            "    $0",
+            "}"
+        ],
+        "description": "Define a function that returns a pointer"
+    },
+    "Manual Memory Header": {
+        "prefix": "manualheader",
+        "body": "#autoFree false;",
+        "description": "Disable automatic memory management"
+    },
+    "Arena Memory Header": {
+        "prefix": "arenaheader",
+        "body": [
+            "#autoFree false;",
+            "#allowMemoryLeaks true;"
+        ],
+        "description": "Enable arena-style allocation (no free needed)"
+    },
+    "Static Mode Header": {
+        "prefix": "staticheader",
+        "body": "#mode static;",
+        "description": "Enable strict static typing mode"
+    },
+    "AutoFree Directive": {
+        "prefix": "autofree",
+        "body": "#autoFree ${1|true,false|};",
+        "description": "Configure automatic memory management"
+    },
+    "Allow Leaks Directive": {
+        "prefix": "leaks",
+        "body": "#allowMemoryLeaks ${1|true,false|};",
+        "description": "Toggle compiler errors for memory leaks"
+    },
+    "Get Current Time": {
+        "prefix": "getCurrentTime",
+        "body": "getCurrentTime()",
+        "description": "Returns Unix epoch timestamp in milliseconds"
+    },
+    "To Seconds": {
+        "prefix": "toSeconds",
+        "body": "toSeconds(${1:ms})",
+        "description": "Convert milliseconds to seconds (float)"
+    },
+    "To Milliseconds": {
+        "prefix": "toMilliseconds",
+        "body": "toMilliseconds(${1:ms})",
+        "description": "Convert milliseconds (identity check)"
+    },
+    "To Minutes": {
+        "prefix": "toMinutes",
+        "body": "toMinutes(${1:ms})",
+        "description": "Convert milliseconds to minutes (float)"
+    },
+    "To Hours": {
+        "prefix": "toHours",
+        "body": "toHours(${1:ms})",
+        "description": "Convert milliseconds to hours (float)"
     }
 }

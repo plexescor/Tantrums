@@ -11,6 +11,7 @@ typedef struct {
     bool is_used;       /* tracked usage for unused variable warning */
     bool holds_alloc;   /* tracked pointer allocations for leak errors */
     bool auto_free;     /* naturally local pointer safely auto-freed at end_scope */
+    bool auto_free_collection; /* naturally local list/map safely freed at end_scope */
 } Local;
 
 typedef struct CompilerState {
@@ -353,6 +354,12 @@ static void end_scope(int line) {
             emit_byte(line, OP_FREE);
         }
 
+        if (local->auto_free_collection && compile_autofree_enabled) {
+            /* Silent free of local list/map — no message to user */
+            emit_bytes(line, OP_GET_LOCAL, (uint8_t)(current->local_count - 1));
+            emit_byte(line, OP_FREE_COLLECTION);
+        }
+
         if (!local->is_used && current->function->name != nullptr && !is_hidden && !is_param && !is_in_loop) {
             fprintf(stderr, "[Line %d] Warning: Unused variable '%s'.\n", line, local->name);
         }
@@ -378,6 +385,7 @@ static int add_local(const char* name, int len, const char* type = nullptr) {
     local->is_used = false;
     local->holds_alloc = false;
     local->auto_free = false;
+    local->auto_free_collection = false;
     if (type) { strncpy(local->type_name, type, 31); local->type_name[31] = '\0'; }
     else local->type_name[0] = '\0';
     return current->local_count++;
@@ -1067,6 +1075,34 @@ static void compile_node(ASTNode* node) {
                         current->locals[slot].holds_alloc = false;
                     } else {
                         current->locals[slot].holds_alloc = false; /* Ambiguous — do not error, let Layer 2 handle it */
+                    }
+                }
+            }
+
+            /* Escape analysis for local list/map declarations — same logic, different action */
+            if (node->as.block.nodes[i]->type == NODE_VAR_DECL &&
+                node->as.block.nodes[i]->as.var_decl.type_name &&
+                (strcmp(node->as.block.nodes[i]->as.var_decl.type_name, "list") == 0 ||
+                 strcmp(node->as.block.nodes[i]->as.var_decl.type_name, "map") == 0)) {
+
+                ASTNode* decl = node->as.block.nodes[i];
+                /* Only auto-manage if init is null (default empty) or a list/map literal — not a function return */
+                bool init_is_collection = (decl->as.var_decl.init == nullptr) ||
+                                          (decl->as.var_decl.init->type == NODE_LIST_LIT) ||
+                                          (decl->as.var_decl.init->type == NODE_MAP_LIT);
+
+                if (init_is_collection && compile_autofree_enabled) {
+                    const char* target_name = decl->as.var_decl.name;
+                    int slot = resolve_local(current, target_name, (int)strlen(target_name));
+                    if (slot != -1) {
+                        EscapeResult er = {false, false, 0, true};
+                        for (int j = i + 1; j < node->as.block.count; j++) {
+                            analyze_escape(current, node->as.block.nodes[j], target_name, 0, &er);
+                            if (er.escaped) break;
+                        }
+                        if (!er.escaped) {
+                            current->locals[slot].auto_free_collection = true;
+                        }
                     }
                 }
             }

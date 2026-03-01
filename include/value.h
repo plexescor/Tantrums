@@ -33,10 +33,10 @@ typedef enum { OBJ_STRING, OBJ_LIST, OBJ_MAP, OBJ_FUNCTION, OBJ_NATIVE, OBJ_POIN
 
 struct Obj        { ObjType type; int refcount; bool is_manual; bool is_marked; Obj* next; };
 struct ObjString  { Obj obj; int length; int capacity; bool is_mutable; char* chars; uint32_t hash; };
-struct ObjList    { Obj obj; Value* items; int count; int capacity; };
+struct ObjList    { Obj obj; Value* items; int count; int capacity; bool escaped; int scope_depth; bool auto_manage; };
 
 typedef struct { Value key; Value value; bool occupied; } MapEntry;
-struct ObjMap     { Obj obj; MapEntry* entries; int count; int capacity; };
+struct ObjMap     { Obj obj; MapEntry* entries; int count; int capacity; bool escaped; int scope_depth; bool auto_manage; };
 
 typedef Value (*NativeFn)(VM* vm, int arg_count, Value* args);
 struct ObjNative  { Obj obj; NativeFn function; const char* name; };
