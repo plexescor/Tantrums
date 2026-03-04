@@ -593,6 +593,7 @@ static InterpretResult run(VM* vm) {
 
         case OP_RETURN: {
             Value result = vm_pop(vm);
+            /* Mark as escaped so vm_exit_scope (during unwind below) does NOT free it */
             if (IS_POINTER(result)) AS_POINTER(result)->escaped = true;
             if (IS_LIST(result))    AS_LIST(result)->escaped = true;
             if (IS_MAP(result))     AS_MAP(result)->escaped = true;
@@ -608,6 +609,25 @@ static InterpretResult run(VM* vm) {
             vm->stack_top = frame->slots;
             vm->scope_depth = restore_depth; /* restore caller's scope depth (should already be reached) */
             vm_push(vm, result);
+
+            /* Re-adopt the returned pointer into the caller's scope.
+             * The pointer was born in the callee's scope (higher depth) so its
+             * scope_depth is stale. Reset it to the caller's current scope_depth
+             * and clear escaped so vm_exit_scope will auto-free it when the
+             * caller's scope eventually exits — that's what #autoFree is for. */
+            if (IS_POINTER(result)) {
+                AS_POINTER(result)->scope_depth = vm->scope_depth;
+                AS_POINTER(result)->escaped = false;
+            }
+            if (IS_LIST(result)) {
+                AS_LIST(result)->scope_depth = vm->scope_depth;
+                AS_LIST(result)->escaped = false;
+            }
+            if (IS_MAP(result)) {
+                AS_MAP(result)->scope_depth = vm->scope_depth;
+                AS_MAP(result)->escaped = false;
+            }
+
             frame = &vm->frames[vm->frame_count - 1];
         } break;
 
@@ -987,11 +1007,28 @@ static InterpretResult run(VM* vm) {
                 if (IS_RANGE(iter_val)) {
                     ObjRange* r = AS_RANGE(iter_val);
                     element = INT_VAL(r->start + counter * r->step);
-                } else if (IS_LIST(iter_val)) {
+                } 
+                else if (IS_LIST(iter_val)) {
                     element = AS_LIST(iter_val)->items[counter];
-                } else if (IS_STRING(iter_val)) {
+                } 
+                else if (IS_STRING(iter_val)) {
                     element = OBJ_VAL(obj_string_new(&(AS_STRING(iter_val)->chars[counter]), 1));
-                } else {
+                } 
+                else if (IS_MAP(iter_val)) {
+                    ObjMap* map = AS_MAP(iter_val);
+                    int found = 0;
+                    element = NULL_VAL;
+                    for (int mi = 0; mi < map->capacity; mi++) {
+                        if (map->entries[mi].occupied) {
+                            if (found == counter) {
+                                element = map->entries[mi].key;
+                                break;
+                            }
+                            found++;
+                        }
+                    }
+                }
+                else {
                     element = NULL_VAL;
                 }
                 

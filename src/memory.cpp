@@ -1,6 +1,6 @@
 #include "memory.h"
 #include "value.h"
-#include "vm.h"
+
 #include "table.h"
 #include "chunk.h"
 #include <cstdlib>
@@ -10,9 +10,8 @@ size_t tantrums_bytes_allocated = 0;
 size_t tantrums_peak_bytes_allocated = 0;
 size_t tantrums_next_gc = 1024 * 1024;
 
-extern Obj* all_objects;
-extern VM* current_vm_for_gc;
 extern bool global_allow_leaks;
+extern const char* current_bytecode_path;
 
 void* tantrums_realloc(void* ptr, size_t old_size, size_t new_size) {
     tantrums_bytes_allocated += new_size;
