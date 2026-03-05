@@ -15,14 +15,14 @@ SECTION 1: OVERVIEW
 ================================================================================
 
 Language Name    : Tantrums
-File Extension   : .42AHH (source)
+File Extension   : .42AHH / .trinitrotoluene (source)
 Written In       : C++ (C++23, no external deps for core, uses LLVM for backend)
 Execution Model  : Native executable via LLVM
 Current Version  : 0.2.0
 
 CLI:
-  tantrums build file.42AHH     compile to native executable
-  tantrums run file.42AHH       compile + execute
+  tantrums build file.42AHH | file.trinitrotoluene     compile to native executable
+  tantrums run file.42AHH | file.trinitrotoluene       compile + execute
 
 Flags:
   --no-autofree-notes            suppress auto-free compiler notes
@@ -283,7 +283,7 @@ SECTION 6: MODULE SYSTEM
 ================================================================================
 
 Import keyword: use
-Syntax: use filename.42AHH;
+Syntax: use filename.42AHH; (or .trinitrotoluene)
 
 Rules:
   - Same directory only
@@ -322,7 +322,7 @@ SECTION 8: COMPILER / NATIVE ARCHITECTURE
 ================================================================================
 
 Pipeline:
-  .42AHH source
+  .42AHH / .trinitrotoluene source
     → Lexer (tokens)
     → Parser (AST)
     → Semantic Analysis (type check, escape analysis)

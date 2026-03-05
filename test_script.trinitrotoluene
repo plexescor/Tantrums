@@ -1,0 +1,5 @@
+#mode static;
+
+tantrum void main() {
+    print("Successfully compiled and ran a .trinitrotoluene file!");
+}

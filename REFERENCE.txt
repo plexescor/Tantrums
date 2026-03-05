@@ -5,13 +5,13 @@
 <<<<<<< HEAD
 Derived from: compiler source (lexer, parser, compiler, runtime, builtins, value,
               memory, ast) + v0.3.0 quick reference
-Extension:    .42AHH  (source)
+Extension:    .42AHH / .trinitrotoluene (source)
 Build target: C++23, CMake 3.15+  (DONT USE MSVC, USE GCC or Clang)
 Runtime:      Native executable via LLVM backend
 =======
 Derived from: compiler source (lexer, parser, compiler, vm, builtins, value,
               bytecode_file, memory, ast) + v0.2.0 quick reference
-Extension:    .42AHH  (source)   /   .42ass  (compiled bytecode)
+Extension:    .42AHH / .trinitrotoluene (source)   /   .42ass  (compiled bytecode)
 Build target: C++23, CMake 3.15+  (MSVC / GCC / Clang)
 Runtime:      register-based bytecode VM (cross-platform)
 Upcoming:     native compilation via LLVM (~4 weeks out)
@@ -59,21 +59,21 @@ TABLE OF CONTENTS
 ================================================================================
 
 <<<<<<< HEAD
-  tantrums build <file.42AHH>
-      Compile .42AHH to a native executable via LLVM.
-      Only files with the .42AHH extension are permitted.
+  tantrums build <file.42AHH | file.trinitrotoluene>
+      Compile .42AHH or .trinitrotoluene to a native executable via LLVM.
+      Only files with the .42AHH or .trinitrotoluene extension are permitted.
       The executable is written to the same directory as the source.
 
-  tantrums run <file.42AHH>
+  tantrums run <file.42AHH | file.trinitrotoluene>
       Compile to native executable, then immediately execute it.
 
   Flags (placed BEFORE the filename, apply to both commands):
 =======
-  tantrums run <file.42AHH>
-      Compile .42AHH to .42ass bytecode, then immediately execute it.
+  tantrums run <file.42AHH | file.trinitrotoluene>
+      Compile .42AHH or .trinitrotoluene to .42ass bytecode, then immediately execute it.
       The .42ass file is written to the same directory as the source.
 
-  tantrums compile <file.42AHH>
+  tantrums compile <file.42AHH | file.trinitrotoluene>
       Compile to .42ass only. Does not execute.
 
   tantrums exec <file.42ass>

@@ -68,7 +68,7 @@ It maps beautifully to systems, scales seamlessly for scripting hacks, and execu
 ## 🚀 Quick Start
 
 Build the native compiler and start emitting executable raw machine code. 
-*(Note: We strictly enforce the `.42AHH` file extension. Yes, that is the real extension. No, we are not changing it.)*
+*(Note: We strictly enforce the `.42AHH` and `.trinitrotoluene` file extensions. Yes, those are the real extensions. No, we are not changing them.)*
 
 ### 1️⃣ Build the Compiler Structure
 Tantrums requires an active **C++23** compiler (Clang/GCC heavily recommended) and **CMake 3.15+**. You must also have your LLVM `-16` developer libraries accessible within your PATH for the codegen phase.
@@ -285,7 +285,7 @@ print("Process Master RSS: " + bytesToMB(getProcessMemory()) + " MB");
 <br>
 
 ## 🎨 VS Code Extension
-Tantrums provides an officially bundled VS Code Extension built specifically for `.42AHH` pipeline integrations right out-of-the-box in the `tantrums-vscode/` directory.
+Tantrums provides an officially bundled VS Code Extension built specifically for `.42AHH` / `.trinitrotoluene` pipeline integrations right out-of-the-box in the `tantrums-vscode/` directory.
 
 ### Key Visual & Intelligence Features:
 - **Vibrant Syntax Highlighting:** Keywords, Type Directives, Control flows, Mathematics, Strings, built-ins, and Comments.
@@ -293,7 +293,7 @@ Tantrums provides an officially bundled VS Code Extension built specifically for
 - **Hover Documentation:** Instantly hover any keyword, built-in, or memory command to receive strict return signatures and help-file definitions on the fly.
 - **Live Extension Diagnostics:** On-save active parsing that traps memory leaks, strict type-checking violations, dead-branch logic loops, and unregistered identifier tracking natively inside VS code!
 
-> **How To Install:** Simply copy the bundled `tantrums-vscode/` directory directly into your local machine's `%USERPROFILE%\.vscode\extensions\` pathing directory, restart VS Code quickly, and select any native `.42AHH` file to see the language leap to life!
+> **How To Install:** Simply copy the bundled `tantrums-vscode/` directory directly into your local machine's `%USERPROFILE%\.vscode\extensions\` pathing directory, restart VS Code quickly, and select any native `.42AHH` or `.trinitrotoluene` file to see the language leap to life!
 
 <br>
 

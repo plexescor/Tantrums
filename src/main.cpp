@@ -1,9 +1,9 @@
 /*  main.cpp  —  Tantrums CLI entry point
  *
  *  Commands:
- *    tantrums build <file.42AHH>    Compile to native executable via LLVM
- *    tantrums compile <file.42AHH>  Compile to .42ass bytecode (legacy)
- *    tantrums run <file.42AHH>      Compile to native + run immediately
+ *    tantrums build <file.42AHH | file.trinitrotoluene>    Compile to native executable via LLVM
+ *    tantrums compile <file.42AHH | file.trinitrotoluene>  Compile to .42ass bytecode (legacy)
+ *    tantrums run <file.42AHH | file.trinitrotoluene>      Compile to native + run immediately
  *
  *  Flags (before filename):
  *    --no-autofree-notes   Suppress auto-free notes on stdout
@@ -341,8 +341,8 @@ static char* make_bytecode_path(const char* source_path) {
 
 static bool check_extension(const char* file_path) {
     const char* ext = strrchr(file_path, '.');
-    if (!ext || strcmp(ext, ".42AHH") != 0) {
-        fprintf(stderr, "Did you really think you can get away with the .42AHH extension just by changing names 🥀🥀🥀\nCompile Error: refrence the above note\n");
+    if (!ext || (strcmp(ext, ".42AHH") != 0 && strcmp(ext, ".trinitrotoluene") != 0)) {
+        fprintf(stderr, "Did you really think you can get away with the .42AHH extension just by changing names 🥀🥀🥀\nCompile Error: reference the above note\n");
         return false;
     }
     return true;
@@ -352,9 +352,9 @@ static bool check_extension(const char* file_path) {
 static void print_usage() {
     printf("Tantrums %s\n", TANTRUMS_VERSION);
     printf("Usage:\n");
-    printf("  tantrums build <file.42AHH>    Compile to native executable\n");
-    printf("  tantrums run <file.42AHH>      Build + run immediately\n");
-    printf("  tantrums compile <file.42AHH>  Compile to .42ass bytecode\n");
+    printf("  tantrums build <file.42AHH | file.trinitrotoluene>    Compile to native executable\n");
+    printf("  tantrums run <file.42AHH | file.trinitrotoluene>      Build + run immediately\n");
+    printf("  tantrums compile <file.42AHH | file.trinitrotoluene>  Compile to .42ass bytecode\n");
 }
 
 /* ── Main ────────────────────────────────────────────── */
@@ -375,7 +375,7 @@ int main(int argc, char* argv[]) {
             arg_idx++;
         }
         if (arg_idx >= argc) {
-            fprintf(stderr, "Usage: tantrums %s [--no-autofree-notes] <file.42AHH>\n", argv[1]);
+            fprintf(stderr, "Usage: tantrums %s [--no-autofree-notes] <file.42AHH | file.trinitrotoluene>\n", argv[1]);
             return 1;
         }
         const char* file_path = argv[arg_idx];
@@ -450,7 +450,7 @@ int main(int argc, char* argv[]) {
             arg_idx++;
         }
         if (arg_idx >= argc) {
-            fprintf(stderr, "Usage: tantrums compile [--no-autofree-notes] <file.42AHH>\n");
+            fprintf(stderr, "Usage: tantrums compile [--no-autofree-notes] <file.42AHH | file.trinitrotoluene>\n");
             return 1;
         }
         const char* file_path = argv[arg_idx];
