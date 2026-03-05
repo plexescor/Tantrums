@@ -124,7 +124,6 @@ static void value_sprint(Value v, char* buf, size_t buf_size) {
 
 #define MAX_TRY_DEPTH 64
 
-<<<<<<< HEAD
 /* These are extern "C" so LLVM-generated code can emit _setjmp directly.
  * setjmp MUST be called in the same function that handles the longjmp
  * return — wrapping it in a helper causes UB since the helper's frame
@@ -134,11 +133,6 @@ extern "C" {
     int              try_depth = 0;
     TantrumsValue    caught_exception = TV_NULL;
 }
-=======
-static jmp_buf   try_stack[MAX_TRY_DEPTH];
-static int       try_depth = 0;
-static TantrumsValue caught_exception = TV_NULL;
->>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 /* Stack trace for runtime errors */
 #define MAX_CALL_STACK 256
@@ -807,12 +801,8 @@ TantrumsValue rt_for_in_step(TantrumsValue iterable, int64_t* counter) {
 void rt_throw(TantrumsValue val) {
     if (try_depth > 0) {
         caught_exception = val;
-<<<<<<< HEAD
         try_depth--;
         longjmp(try_stack[try_depth], 1);
-=======
-        longjmp(try_stack[try_depth - 1], 1);
->>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     }
     /* Uncaught throw */
     Value v = tv_to_value(val);
@@ -822,7 +812,6 @@ void rt_throw(TantrumsValue val) {
     exit(1);
 }
 
-<<<<<<< HEAD
 /* rt_try_push: called AFTER a successful _setjmp(try_stack[try_depth])==0
  * in the LLVM IR to increment the depth. */
 void rt_try_push(void) {
@@ -836,18 +825,6 @@ void* rt_get_jmpbuf(void) {
         exit(1);
     }
     return (void*)&try_stack[try_depth];
-=======
-int32_t rt_try_enter(void) {
-    if (try_depth >= MAX_TRY_DEPTH) {
-        rt_fatal_error("Too many nested try blocks.");
-    }
-    if (setjmp(try_stack[try_depth]) != 0) {
-        /* Landed here from longjmp (exception caught) */
-        return 1;
-    }
-    try_depth++;
-    return 0;
->>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 }
 
 void rt_try_exit(void) {

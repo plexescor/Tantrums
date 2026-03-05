@@ -56,11 +56,7 @@ set(RUNTIME_SOURCES
     "${CMAKE_SOURCE_DIR}/src/memory.cpp"
     "${CMAKE_SOURCE_DIR}/src/table.cpp"
     "${CMAKE_SOURCE_DIR}/src/chunk.cpp"
-<<<<<<< HEAD
-    "${CMAKE_SOURCE_DIR}/src/stdlib/maths.cpp"
-=======
->>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
-)
+    "${CMAKE_SOURCE_DIR}/src/stdlib/maths.cpp")
 set(RUNTIME_LIB "${CMAKE_BINARY_DIR}/tantrums_rt.lib")
 
 # Compile each source to .obj
@@ -97,7 +93,7 @@ add_custom_command(
 )
 add_custom_target(runtime_lib DEPENDS "${RUNTIME_LIB}")
 
-# ── Main executable sources (exclude vm.cpp and runtime.cpp) ──
+# ── Main executable sources (runtime.cpp) ──
 set(SOURCES
     src/ast.cpp
     src/chunk.cpp
@@ -110,6 +106,7 @@ set(SOURCES
     src/table.cpp
     src/token.cpp
     src/value.cpp
+    src/stdlib/maths.cpp
     src/bytecode_file.cpp
 )
 

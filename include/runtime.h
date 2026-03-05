@@ -8,10 +8,7 @@
 
 #include <cstdint>
 #include <cstring>
-<<<<<<< HEAD
 #include <csetjmp>
-=======
->>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 /* ─────────────────────────── NaN-boxing ─────────────────────────── */
 
@@ -125,16 +122,10 @@ int32_t         rt_for_in_has_next(TantrumsValue iterable, int64_t idx);
 
 /* ── Error handling ─────────────────────────────────── */
 void            rt_throw(TantrumsValue val);
-<<<<<<< HEAD
 void            rt_try_push(void);   /* increment try_depth after _setjmp()==0 */
 void            rt_try_exit(void);
 TantrumsValue   rt_caught_val(void);
 void*           rt_get_jmpbuf(void); /* returns ptr to try_stack[try_depth] */
-=======
-int32_t         rt_try_enter(void);
-void            rt_try_exit(void);
-TantrumsValue   rt_caught_val(void);
->>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 /* ── Type casting ───────────────────────────────────── */
 TantrumsValue   rt_cast(TantrumsValue v, int32_t target_type);
