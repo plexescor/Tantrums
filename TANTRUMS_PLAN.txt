@@ -15,15 +15,14 @@ SECTION 1: OVERVIEW
 ================================================================================
 
 Language Name    : Tantrums
-File Extension   : .42AHH (source) / .42ass (compiled bytecode)
-Written In       : C++ (C++23, no external deps for core)
-Execution Model  : Bytecode interpreter (current), Native compiler (future)
+File Extension   : .42AHH (source)
+Written In       : C++ (C++23, no external deps for core, uses LLVM for backend)
+Execution Model  : Native executable via LLVM
 Current Version  : 0.2.0
 
 CLI:
+  tantrums build file.42AHH     compile to native executable
   tantrums run file.42AHH       compile + execute
-  tantrums compile file.42AHH   compile only → .42ass
-  tantrums exec file.42ass       execute precompiled bytecode
 
 Flags:
   --no-autofree-notes            suppress auto-free compiler notes
@@ -127,7 +126,7 @@ Operators:
   String concat:  + auto-converts any type to string when one operand is string
 
 NOT SUPPORTED:
-  & (address-of)              variables live in VM stack slots, no stable address
+  & (address-of)              variables live in native stack slots via alloca, no stable address
   Pointer arithmetic          p + 1, p++, etc.
   Type casting                (int*)p
 
@@ -202,16 +201,15 @@ Tantrums has a THREE-DIRECTIVE memory system. Philosophy per file.
   Conservative rule: when in doubt → skip everything.
 
   Escape conditions (ANY = skip auto-free and leak error):
-    1. pointer appears in any return statement
-    2. pointer passed as argument to any function call
-    3. pointer passed to append()
-    4. pointer assigned to another variable (alias)
-    5. pointer stored in a map value
-    6. pointer assigned to a global variable
-    7. pointer appears anywhere inside a conditional (if/while/for)
-    8. pointer used in complex expression beyond simple *p read/write
-    9. pointer appears in any operator expression
-    10. pointer used in more than one distinct way after declaration
+    1. Appears in a return statement
+    2. Passed as a function argument
+    3. Passed to append()
+    4. Assigned to another variable (alias)
+    5. Stored in a map
+    6. Assigned to a global variable
+    7. Appears inside a conditional branch (if/while/for body)
+    8. Used in a complex expression
+    9. Used in more than one distinct way (use_count > 1)
 
   Priority order:
     1. escape detected → do nothing, trust developer
@@ -220,6 +218,8 @@ Tantrums has a THREE-DIRECTIVE memory system. Philosophy per file.
     4. ambiguous → do nothing, runtime handles it
 
 ── MEMORY SAFETY STACK ─────────────────────────────────────────────────────────
+
+  NOTE: The 7 layers memory safety system isn't working right now.
 
   Layer 1: Compile-time escape analysis     no false positives
   Layer 2: Compile-time auto-free           provably local pointers
@@ -264,8 +264,8 @@ Timing:
 
 Memory profiling:
   getProcessMemory()          process RSS in bytes
-  getVmMemory()               Tantrums heap usage in bytes
-  getVmPeakMemory()           peak Tantrums heap in bytes
+  getHeapMemory()             Tantrums heap usage in bytes
+  getHeapPeakMemory()         peak Tantrums heap in bytes
   bytesToKB(bytes)            → KB (float)
   bytesToMB(bytes)            → MB (float)
   bytesToGB(bytes)            → GB (float)
@@ -318,44 +318,43 @@ Try/Catch:
 
 
 ================================================================================
-SECTION 8: COMPILER / VM ARCHITECTURE
+SECTION 8: COMPILER / NATIVE ARCHITECTURE
 ================================================================================
 
 Pipeline:
   .42AHH source
     → Lexer (tokens)
     → Parser (AST)
-    → Semantic Analysis (type check, escape analysis, variable resolution)
-    → Code Generator (bytecode + auto-free injection)
-    → .42ass binary (includes directive flags in header)
-    → VM (reads flags from header, executes bytecode)
+    → Semantic Analysis (type check, escape analysis)
+    → Code Generator (LLVM IR + auto-free injection)
+    → Native Compiler (executable via lld)
 
 Project structure:
   src/
     main.cpp              Entry point, CLI
     lexer.cpp             Tokenizer
     parser.cpp            Recursive descent parser → AST
-    compiler.cpp          AST → bytecode, type checking, escape analysis
-    vm.cpp                Stack-based VM, scope tracking, runtime auto-free
+    compiler.cpp          AST → type checking, escape analysis
+    LLVMCodegen.cpp       AST → LLVM IR generation
+    runtime.cpp           Native runtime, scope tracking, memory safety, builtins
     builtins.cpp          Built-in functions
     value.cpp             Value types, string interning
     memory.cpp            Leak detection, tracking, log generation
     ast.cpp               AST node allocation/deallocation
-    bytecode_file.cpp     .42ass serialization/deserialization
   include/                Header files
   tantrums-vscode/        VS Code extension
 
-VM design:
-  Stack-based bytecode VM
-  Variables in indexed call frame slots (not heap objects)
-  Values are raw 8-byte stack entries (no boxing for primitives)
-  Scope depth tracked per frame for runtime auto-free
-  Directive flags baked into .42ass header — VM reads on startup
+Native design:
+  LLVM backend
+  Variables in native stack via alloca (not heap objects)
+  Values are raw 8-byte NaN-boxed entries
+  Scope depth tracked via runtime auto-free calls
+  Compile-time flags linked directly into the final executable
 
 Why faster than Python:
   Python: every int is a 28-byte heap object with refcount + type dispatch
-  Tantrums: raw 8-byte value on stack, no object, no refcount, no dispatch
-  Result: 11x faster on tight integer loops (measured, not estimated)
+  Tantrums: raw 8-byte value on native stack, LLVM optimized optimizations
+  Result: significantly faster on tight integer loops (original VM was already 11x faster)
 
 
 ================================================================================
@@ -364,13 +363,13 @@ SECTION 9: VERSIONING / ROADMAP
 
 v0.1.0 — initial release (done):
   [x] Lexer, parser, AST
-  [x] Bytecode compiler + VM
+  [x] Native compiler via LLVM (replaced Bytecode compiler + VM)
   [x] Variables, functions, control flow
   [x] Built-in types (int, float, string, bool, list, map)
   [x] Manual memory (alloc/free)
   [x] Safe pointers (* dereference, use-after-free/double-free detection)
   [x] Core built-in functions
-  [x] Cross-platform bytecode
+  [x] Cross-platform compilation
   [x] Error handling (throw, try/catch, nested rethrow)
   [x] Type checking (#mode static/dynamic/both)
   [x] Module imports (use keyword, circular import prevention)
@@ -378,12 +377,12 @@ v0.1.0 — initial release (done):
   [x] Built-in profiling (timing + memory functions)
 
 v0.2.0 — memory system (done):
-  [x] Compile-time escape analysis (10 escape conditions, conservative rule)
+  [x] Compile-time escape analysis (9 escape conditions, conservative rule)
   [x] Compile-time auto-free (provably local pointers)
   [x] Runtime auto-free (scope exit safety net)
   [x] Exit leak detector (line numbers, types, sizes, deduplication, log)
   [x] memleaklog.txt (>5 leaks redirected, grouped, timestamped)
-  [x] #autoFree directive (true/false, baked into bytecode header)
+  [x] #autoFree directive (true/false, baked into executable)
   [x] #allowMemoryLeaks directive (requires #autoFree false)
   [x] void keyword
   [x] int* return type syntax (tantrum int* foo())
@@ -398,10 +397,10 @@ v1.0 — stability + bug fixes (next):
   [ ] Fix 30 Linux GCC warnings
   [ ] Write WHY.md (design decisions documented)
   [ ] Build one real demo program (snake, calculator, or similar)
+  [x] Math module (sin, cos, tan, sec, cosec, cot, floor, ceil, random_int, random_float)
 
 v2.0 — standard library:
   [ ] Slab allocator (replace malloc for small objects, 5-10x allocation speed)
-  [ ] math module (sin, cos, sqrt, pow, abs, floor, ceil, log, etc.)
   [ ] fs module (read, write, append, exists, delete, listdir)
   [ ] io module
   [ ] String module (split, trim, replace, indexOf, substring, toLower, toUpper)
@@ -412,16 +411,11 @@ v3.0 — graphics:
   [ ] graphics module (OpenGL)
   [ ] audio module [TBD]
 
-v4.0 — JIT:
-  [ ] LLVM JIT backend
-  [ ] Hot loop detection + native compilation
-
-v5.0 — native compilation:
-  [ ] Full LLVM IR emission
+v4.0 — optimizing compiler:
   [ ] Link-time optimization
   [ ] SIMD auto-vectorization
   [ ] Platform-specific tuning
-
+  (Note: LLVM backend was moved from future v5.0 to current v0.2.0 early!)
 
 ================================================================================
 SECTION 10: KNOWN BUGS (v0.2.0)
@@ -475,20 +469,16 @@ Linux GCC Release is slightly faster than Windows MSVC Release
 for the same source due to GCC -O2/-O3 optimization quality.
 
 Performance projections:
-  v1.0 (bugs fixed):       ~12x faster than Python
-  v2.0 (slab allocator):   ~15x faster
-  v4.0 (JIT):              ~60-80x faster
-  v5.0 (LLVM native):      ~100-150x faster
+  With Native LLVM Backend: massive execution speedup expected.
 
 
 ================================================================================
 SECTION 12: DESIGN DECISIONS & PHILOSOPHY
 ================================================================================
 
-WHY .42AHH and .42ass?
+WHY .42AHH?
   42 → The Hitchhiker's Guide to the Galaxy (the answer to everything)
   AHH → screaming in caps (the developer experience)
-  ass → the bytecode is called .42ass because why not
   Memorable, unique, personality over convention.
 
 WHY tantrum as the function keyword?

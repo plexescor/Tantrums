@@ -39,3 +39,6 @@ Makefile
 
 # Tests
 tests/
+
+# llvm
+external/llvm-backend

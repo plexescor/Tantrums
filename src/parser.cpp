@@ -260,6 +260,15 @@ static ASTNode* call_expr(Parser* p) {
             idx->as.index_access.index = expression(p);
             consume(p, TOKEN_RIGHT_BRACKET, "Expected ']'.");
             expr = idx;
+        } else if (match(p, TOKEN_DOT)) {
+            Token* name = consume(p, TOKEN_IDENTIFIER, "Expected property name after '.'.");
+            ASTNode* key = ast_new(NODE_STRING_LIT, name->line);
+            key->as.string_literal.value = copy_lexeme(name);
+            key->as.string_literal.length = name->length;
+            ASTNode* idx = ast_new(NODE_INDEX, previous(p)->line);
+            idx->as.index_access.object = expr;
+            idx->as.index_access.index = key;
+            expr = idx;
         } else if (expr->type == NODE_IDENTIFIER && (check(p, TOKEN_PLUS_PLUS) || check(p, TOKEN_MINUS_MINUS))) {
             TokenType op = advance_tok(p)->type;
             ASTNode* postfix = ast_new(NODE_POSTFIX, previous(p)->line);
