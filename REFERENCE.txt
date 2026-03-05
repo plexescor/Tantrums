@@ -2,11 +2,20 @@
                      TANTRUMS LANGUAGE — COMPREHENSIVE REFERENCE
 ================================================================================
 
+<<<<<<< HEAD
 Derived from: compiler source (lexer, parser, compiler, runtime, builtins, value,
               memory, ast) + v0.3.0 quick reference
 Extension:    .42AHH  (source)
 Build target: C++23, CMake 3.15+  (DONT USE MSVC, USE GCC or Clang)
 Runtime:      Native executable via LLVM backend
+=======
+Derived from: compiler source (lexer, parser, compiler, vm, builtins, value,
+              bytecode_file, memory, ast) + v0.2.0 quick reference
+Extension:    .42AHH  (source)   /   .42ass  (compiled bytecode)
+Build target: C++23, CMake 3.15+  (MSVC / GCC / Clang)
+Runtime:      register-based bytecode VM (cross-platform)
+Upcoming:     native compilation via LLVM (~4 weeks out)
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 NOTE ON ACCURACY: This reference was cross-referenced directly against the
 compiler source code. Where the old quick-reference disagreed with actual
@@ -35,7 +44,11 @@ TABLE OF CONTENTS
  17.  Type System & Modes
  18.  Compile-Time Diagnostics
  19.  Runtime Behavior & Errors
+<<<<<<< HEAD
  20.  Native Executable Format
+=======
+ 20.  Bytecode Format (.42ass)
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
  21.  Building from Source
  22.  Complete Example Programs
  23.  Known Limitations & TBD Features
@@ -45,6 +58,7 @@ TABLE OF CONTENTS
 1. CLI USAGE
 ================================================================================
 
+<<<<<<< HEAD
   tantrums build <file.42AHH>
       Compile .42AHH to a native executable via LLVM.
       Only files with the .42AHH extension are permitted.
@@ -54,11 +68,25 @@ TABLE OF CONTENTS
       Compile to native executable, then immediately execute it.
 
   Flags (placed BEFORE the filename, apply to both commands):
+=======
+  tantrums run <file.42AHH>
+      Compile .42AHH to .42ass bytecode, then immediately execute it.
+      The .42ass file is written to the same directory as the source.
+
+  tantrums compile <file.42AHH>
+      Compile to .42ass only. Does not execute.
+
+  tantrums exec <file.42ass>
+      Execute a pre-compiled .42ass file (no source needed).
+
+  Flags (placed BEFORE the filename, apply to all three commands):
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     --no-autofree-notes
         Suppress "[Tantrums] note: auto-freed 'x' at line N" messages.
         Does NOT suppress the autoFree.txt report written on exit.
 
   Examples:
+<<<<<<< HEAD
     tantrums build main.42AHH
     tantrums run main.42AHH
     tantrums run --no-autofree-notes main.42AHH
@@ -69,6 +97,19 @@ TABLE OF CONTENTS
 
   The generated executable is platform-specific. Compile on Windows for Windows,
   compile on Linux for Linux.
+=======
+    tantrums run main.42AHH
+    tantrums run --no-autofree-notes main.42AHH
+    tantrums compile main.42AHH
+    tantrums exec main.42ass
+
+  On startup the runtime prints mode info:
+    [Tantrums] Mode: both (typed + dynamic)
+    [Tantrums] Compiled -> main.42ass
+
+  The .42ass format is cross-platform. Compile on Windows, run on Linux
+  as long as the VM binary is built for that OS.
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 
 ================================================================================
@@ -599,15 +640,22 @@ POINTER SIZE IN REPORTS
 
   Leak and auto-free reports show alloc size as sizeof(ObjPointer) + sizeof(Value).
   On 64-bit systems this is typically 96 bytes per allocation.
+<<<<<<< HEAD
   This is tracking overhead, not just the stored value size.
+=======
+  This is VM tracking overhead, not just the stored value size.
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 
 ================================================================================
 10. AUTO-FREE SYSTEM (ESCAPE ANALYSIS)
 ================================================================================
 
+<<<<<<< HEAD
   NOTE: 7 layers memory safety system isnt working rightnow.
 
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
   When #autoFree true (default), the compiler and runtime automatically
   manage pointers, lists, and maps that are provably local. Two-layer system:
 
@@ -654,14 +702,24 @@ LAYER 2 -- RUNTIME (scope-depth tracking)
     - Assigned to a slot in a shallower scope (OP_SET_LOCAL cross-scope check)
     - Returned from a function (OP_RETURN)
 
+<<<<<<< HEAD
   Auto-free report at program exit (rt_shutdown):
     <= 20 auto-frees: printed to stdout
     >  20 auto-frees: written to autoFree.txt in same dir as executable
+=======
+  Auto-free report at program exit (vm_free):
+    <= 20 auto-frees: printed to stdout
+    >  20 auto-frees: written to autoFree.txt in same dir as .42ass
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
   Report format:
     TANTRUMS AUTO-FREE REPORT
     ============================
+<<<<<<< HEAD
     Executable: main.exe
+=======
+    Executable: main.42ass
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     Auto-Frees: N allocations
     ============================
       alloc at line X in <func> -- <type> (Y bytes)
@@ -680,18 +738,30 @@ LAYER 2 -- RUNTIME (scope-depth tracking)
   At exit, any alloc'd pointer not freed is a leak and is reported.
 
   <= 5 leaks: printed to stderr
+<<<<<<< HEAD
   >  5 leaks: written to memleaklog.txt in same dir as executable.
+=======
+  >  5 leaks: written to memleaklog.txt in same dir as .42ass.
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
               Brief notice to stderr.
 
   Stderr notice (> 5 leaks):
     [Tantrums Warning] Memory leak detected: N allocation(s) not freed.
+<<<<<<< HEAD
     See memleaklog.txt in the same directory as the executing binary.
+=======
+    See memleaklog.txt in the same directory as the executing bytecode.
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
   memleaklog.txt format:
     TANTRUMS MEMORY LEAK REPORT
     ============================
     Note: #allowMemoryLeaks true -- leaks permitted by developer.   (if applicable)
+<<<<<<< HEAD
     Executable: main.exe
+=======
+    Executable: main.42ass
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     Leaks: N,NNN allocations
     ============================
       alloc at line X in <func> -- <type> (Y bytes)
@@ -762,7 +832,12 @@ TRY / CATCH
   Runtime errors (null deref, division by zero, etc.) are catchable when
   inside a try block. The error message string becomes the catch variable.
 
+<<<<<<< HEAD
   Max nested try blocks: MAX_TRY_DEPTH (defined in runtime.cpp).
+=======
+  OP_TRY_BEGIN pushes an ExceptionHandler. OP_TRY_END pops it.
+  Max nested try blocks: MAX_EXCEPTION_HANDLERS (defined in vm.h).
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 
 ================================================================================
@@ -843,6 +918,7 @@ TRY / CATCH
 
 
 ================================================================================
+<<<<<<< HEAD
 14.5 MATH STANDARD LIBRARY
 ================================================================================
 
@@ -862,6 +938,8 @@ TRY / CATCH
 
 
 ================================================================================
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 15. PROFILING & TIMING API
 ================================================================================
 
@@ -893,11 +971,19 @@ TRY / CATCH
         macOS:   mach_task_basic_info (resident_size)
         Linux:   /proc/self/statm (RSS * page size)
 
+<<<<<<< HEAD
   getHeapMemory() -> int
       Current Tantrums-managed heap in bytes (tracks all tantrums_realloc calls).
 
   getHeapPeakMemory() -> int
       Peak Tantrums heap usage in bytes since program start.
+=======
+  getVmMemory() -> int
+      Current Tantrums-managed heap in bytes (tracks all tantrums_realloc calls).
+
+  getVmPeakMemory() -> int
+      Peak VM heap usage in bytes since program start.
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
   bytesToKB(bytes) -> float     bytes / 1024.0
   bytesToMB(bytes) -> float     bytes / (1024^2)
@@ -1032,6 +1118,7 @@ RETURN TYPE ENFORCEMENT BY MODE
 
 
 ================================================================================
+<<<<<<< HEAD
 20. NATIVE EXECUTABLE FORMAT
 ================================================================================
 
@@ -1044,6 +1131,35 @@ RETURN TYPE ENFORCEMENT BY MODE
   Memory usage is generally a fraction of interpretation overhead.
 
   Loading a legacy .42ass file is not supported in the standard native builder.
+=======
+20. BYTECODE FORMAT (.42ass)
+================================================================================
+
+  Header:
+    4 bytes  magic identifier (BYTECODE_MAGIC from bytecode_file.h)
+    1 byte   version field (BYTECODE_VERSION)
+    1 byte   global_allow_leaks flag (0 or 1)
+    1 byte   global_autofree flag (0 or 1)
+
+  Body: recursive function encoding, starting from the top-level script.
+
+  Per function:
+    u32    name length (0 = anonymous/script)
+    bytes  name chars
+    u32    arity
+    u32    constant pool count
+    [constants]
+      u8   tag: 0=int, 1=float, 2=string, 3=bool(true), 4=bool(false),
+                5=null, 6=function (recursive)
+      data (tag-dependent lengths)
+    u32    bytecode length
+    bytes  raw bytecode
+    u32    line info count (= bytecode length)
+    i32[]  line number per byte (little-endian signed 32-bit)
+
+  All multi-byte integers: little-endian. Floats: IEEE 754 double (8 bytes).
+  Loading a file with the wrong version -> error and refusal to run.
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
 
 ================================================================================
@@ -1277,15 +1393,27 @@ RETURN TYPE ENFORCEMENT BY MODE
 ================================================================================
 
   Not yet implemented (as of this source snapshot):
+<<<<<<< HEAD
+=======
+    Math module:         use math;  (sin, cos, sqrt, pow, abs, floor, ceil)
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     File system:         use fs;    (read, write, append, exists, delete)
     C/C++ FFI:           foreign "C" { ... }
     Graphics:            OpenGL / Vulkan modules
     Window creation:     Win32 / GLFW / SDL2
     Audio
     Networking
+<<<<<<< HEAD
     Package manager
 
   Hard limits (from compiler/runtime source):
+=======
+    Native compilation:  .42AHH -> native binary via LLVM  (~4 weeks)
+    JIT:                 LLVM backend
+    Package manager
+
+  Hard limits (from compiler/VM source):
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     64        max imports per file (array in compile_source)
     512       max tracked globals  (MAX_GLOBALS, compiler.cpp)
     256       max function signatures  (MAX_FUNC_SIGS, compiler.cpp)
@@ -1294,15 +1422,26 @@ RETURN TYPE ENFORCEMENT BY MODE
     65535     max constants per function  (uint16_t index)
     100       max unique leak groups in memleaklog.txt
     MAX_LOCALS     (compiler.h) max locals per function
+<<<<<<< HEAD
     MAX_CALL_STACK (runtime.cpp) max call stack depth limit trace
     MAX_TRY_DEPTH  (runtime.cpp) max nested try blocks
     MAX_SCOPES     (runtime.cpp) max nested scopes tracked at runtime
+=======
+    MAX_FRAMES     (vm.h) max call stack depth
+    MAX_EXCEPTION_HANDLERS  (vm.h) max nested try blocks
+    MAX_LOCAL_SCOPES        (vm.h) max nested scopes tracked at runtime
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
   Behavioral notes:
     - print(myMap) outputs "<map>", not key-value pairs.
     - for-in over map: iterates keys in hash table order, not insertion order.
     - & (address-of) is lexed as TOKEN_AMPERSAND but is NOT implemented.
       Using it produces undefined behavior. Do not use.
+<<<<<<< HEAD
+=======
+    - OP_CLONE exists in the VM bytecode but is not generated by the compiler.
+      List cloning is not yet exposed as user syntax.
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     - Strings have an internal is_mutable flag but users cannot declare
       mutable strings. All user-visible strings behave as immutable.
     - Escape analysis condition 7 is conservative: ANY pointer appearing
@@ -1334,4 +1473,8 @@ COMMENTS
 
 ================================================================================
 END OF REFERENCE
+<<<<<<< HEAD
 ================================================================================
+=======
+================================================================================
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174

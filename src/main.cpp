@@ -339,6 +339,7 @@ static char* make_bytecode_path(const char* source_path) {
     return out;
 }
 
+<<<<<<< HEAD
 static bool check_extension(const char* file_path) {
     const char* ext = strrchr(file_path, '.');
     if (!ext || strcmp(ext, ".42AHH") != 0) {
@@ -348,6 +349,8 @@ static bool check_extension(const char* file_path) {
     return true;
 }
 
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 /* ── Usage ───────────────────────────────────────────── */
 
 static void print_usage() {
@@ -380,8 +383,11 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         const char* file_path = argv[arg_idx];
+<<<<<<< HEAD
 
         if (!check_extension(file_path)) return 1;
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
         char* source = read_file(file_path);
         if (!source) return 1;
@@ -456,8 +462,11 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         const char* file_path = argv[arg_idx];
+<<<<<<< HEAD
 
         if (!check_extension(file_path)) return 1;
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
         char* source = read_file(file_path);
         if (!source) return 1;

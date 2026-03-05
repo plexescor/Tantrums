@@ -56,7 +56,10 @@ set(RUNTIME_SOURCES
     "${CMAKE_SOURCE_DIR}/src/memory.cpp"
     "${CMAKE_SOURCE_DIR}/src/table.cpp"
     "${CMAKE_SOURCE_DIR}/src/chunk.cpp"
+<<<<<<< HEAD
     "${CMAKE_SOURCE_DIR}/src/stdlib/maths.cpp"
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 )
 set(RUNTIME_LIB "${CMAKE_BINARY_DIR}/tantrums_rt.lib")
 

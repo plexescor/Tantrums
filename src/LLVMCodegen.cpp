@@ -77,10 +77,13 @@ struct Codegen {
     std::vector<LoopInfo> loopStack;
     CompileMode mode = MODE_BOTH;
 
+<<<<<<< HEAD
     /* try_stack / try_depth globals for setjmp */
     llvm::GlobalVariable* tryStackGV = nullptr;
     llvm::GlobalVariable* tryDepthGV = nullptr;
 
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     /* ── helpers ─────────────────────────────────────── */
 
     llvm::AllocaInst* createEntryAlloca(llvm::Function* F, const std::string& name) {
@@ -127,7 +130,10 @@ struct Codegen {
     }
 
     llvm::ConstantInt* i32Val(int n) { return llvm::ConstantInt::get(llvm::Type::getInt32Ty(ctx), n); }
+<<<<<<< HEAD
     llvm::ConstantInt* i64Val(int64_t n) { return llvm::ConstantInt::get(llvm::Type::getInt64Ty(ctx), n); }
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 };
 
 /* ══════════════════════════════════════════════════════════════════
@@ -188,6 +194,7 @@ static void declareRuntimeFunctions(Codegen& cg) {
     decl("rt_for_in_step", i64, {i64, pi64});
     decl("rt_for_in_has_next", i32, {i64, i64});
     decl("rt_throw",       v,   {i64});
+<<<<<<< HEAD
     decl("rt_try_push",    v,   {});
     decl("rt_try_exit",    v,   {});
     decl("rt_caught_val",  i64, {});
@@ -197,6 +204,11 @@ static void declareRuntimeFunctions(Codegen& cg) {
      * Must be called directly in generated code with the frame pointer. */
     decl("_setjmp",        i32, {p8, p8});
 
+=======
+    decl("rt_try_enter",   i32, {});
+    decl("rt_try_exit",    v,   {});
+    decl("rt_caught_val",  i64, {});
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
     decl("rt_cast",        i64, {i64, i32});
     decl("rt_enter_scope", v,   {});
     decl("rt_exit_scope",  v,   {});
@@ -215,6 +227,7 @@ static void declareRuntimeFunctions(Codegen& cg) {
     decl("rt_bytesToKB",           i64, {i64});
     decl("rt_bytesToMB",           i64, {i64});
     decl("rt_bytesToGB",           i64, {i64});
+<<<<<<< HEAD
     
     decl("rt_math_sin",          i64, {i64});
     decl("rt_math_cos",          i64, {i64});
@@ -226,6 +239,8 @@ static void declareRuntimeFunctions(Codegen& cg) {
     decl("rt_math_ceil",         i64, {i64});
     decl("rt_math_random_int",   i64, {i64, i64});
     decl("rt_math_random_float", i64, {i64, i64});
+=======
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -355,6 +370,7 @@ static llvm::Value* codegenExpr(Codegen& cg, ASTNode* node) {
 
     case NODE_CALL: {
         ASTNode* callee = node->as.call.callee;
+<<<<<<< HEAD
         int argc = node->as.call.arg_count;
 
         /* Directly intercept math.[function]() for lightning-fast native codegen without Map lookups */
@@ -381,6 +397,11 @@ static llvm::Value* codegenExpr(Codegen& cg, ASTNode* node) {
 
         if (callee->type != NODE_IDENTIFIER) return cg.makeNull();
         const char* name = callee->as.identifier.name;
+=======
+        if (callee->type != NODE_IDENTIFIER) return cg.makeNull();
+        const char* name = callee->as.identifier.name;
+        int argc = node->as.call.arg_count;
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
 
         /* ── Built-in functions ── */
         if (strcmp(name, "print") == 0) {
@@ -597,10 +618,17 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
         cg.callRT("rt_enter_scope", {});
         for (int i = 0; i < node->as.block.count; i++) {
             codegenStmt(cg, node->as.block.nodes[i]);
+<<<<<<< HEAD
             if (cg.B->GetInsertBlock()->getTerminator()) break;
         }
         if (!cg.B->GetInsertBlock()->getTerminator())
             cg.callRT("rt_exit_scope", {});
+=======
+            if (node->as.block.nodes[i]->type == NODE_RETURN ||
+                node->as.block.nodes[i]->type == NODE_THROW) break;
+        }
+        cg.callRT("rt_exit_scope", {});
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
         cg.popScope();
         break;
 
@@ -734,6 +762,7 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
         llvm::BasicBlock* tryBB   = llvm::BasicBlock::Create(cg.ctx, "try", F);
         llvm::BasicBlock* catchBB = llvm::BasicBlock::Create(cg.ctx, "catch", F);
         llvm::BasicBlock* endBB   = llvm::BasicBlock::Create(cg.ctx, "tryend", F);
+<<<<<<< HEAD
 
         /* Get pointer to current jmp_buf slot, call _setjmp with frame addr */
         llvm::Value* jbPtr = cg.callRT("rt_get_jmpbuf", {});
@@ -755,6 +784,14 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
         }
 
         /* Catch body (setjmp returned 1 via longjmp) */
+=======
+        llvm::Value* result = cg.callRT("rt_try_enter", {});
+        cg.B->CreateCondBr(cg.B->CreateICmpEQ(result, cg.i32Val(1)), catchBB, tryBB);
+        cg.B->SetInsertPoint(tryBB);
+        codegenStmt(cg, node->as.try_catch.try_body);
+        cg.callRT("rt_try_exit", {});
+        if (!cg.B->GetInsertBlock()->getTerminator()) cg.B->CreateBr(endBB);
+>>>>>>> edf689ec3e6372e0694493081bf10302d2b11174
         cg.B->SetInsertPoint(catchBB);
         cg.pushScope();
         if (node->as.try_catch.err_var) {
