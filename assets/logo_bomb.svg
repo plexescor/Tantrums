@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#080808"/>
+      <stop offset="100%" style="stop-color:#111111"/>
+    </linearGradient>
+    <radialGradient id="bombBody" cx="42%" cy="38%" r="60%">
+      <stop offset="0%" style="stop-color:#3a3a3a"/>
+      <stop offset="60%" style="stop-color:#1a1a1a"/>
+      <stop offset="100%" style="stop-color:#0d0d0d"/>
+    </radialGradient>
+    <radialGradient id="bombShine" cx="35%" cy="30%" r="40%">
+      <stop offset="0%" style="stop-color:#ffffff;stop-opacity:0.12"/>
+      <stop offset="100%" style="stop-color:#ffffff;stop-opacity:0"/>
+    </radialGradient>
+    <radialGradient id="explosionGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#fff;stop-opacity:1"/>
+      <stop offset="25%" style="stop-color:#ffff00;stop-opacity:1"/>
+      <stop offset="55%" style="stop-color:#ff6600;stop-opacity:0.9"/>
+      <stop offset="100%" style="stop-color:#ff0000;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="bombGlow">
+      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="flameGlow">
+      <feGaussianBlur stdDeviation="6" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="superGlow">
+      <feGaussianBlur stdDeviation="12" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="400" height="400" fill="url(#bg4)" rx="24"/>
+
+  <!-- Subtle ambient bomb glow on bg -->
+  <circle cx="195" cy="200" r="140" fill="#ff4400" opacity="0.04"/>
+
+  <!-- ===== EXPLOSION at fuse tip ===== -->
+  <!-- Outer explosion petals -->
+  <g filter="url(#superGlow)" opacity="0.7">
+    <ellipse cx="258" cy="112" rx="28" ry="14" fill="#ff4400" transform="rotate(-40, 258, 112)"/>
+    <ellipse cx="258" cy="112" rx="22" ry="10" fill="#ff8800" transform="rotate(10, 258, 112)"/>
+    <ellipse cx="258" cy="112" rx="20" ry="9" fill="#ffcc00" transform="rotate(65, 258, 112)"/>
+    <ellipse cx="258" cy="112" rx="18" ry="8" fill="#ffaa00" transform="rotate(-85, 258, 112)"/>
+  </g>
+  <!-- Mid explosion -->
+  <g filter="url(#flameGlow)">
+    <ellipse cx="258" cy="112" rx="18" ry="9" fill="#ff6600" transform="rotate(-50, 258, 112)"/>
+    <ellipse cx="258" cy="112" rx="15" ry="7" fill="#ffcc00" transform="rotate(20, 258, 112)"/>
+    <ellipse cx="258" cy="112" rx="14" ry="6" fill="#ff8800" transform="rotate(80, 258, 112)"/>
+  </g>
+  <!-- Core explosion white-hot -->
+  <circle cx="258" cy="112" r="11" fill="url(#explosionGrad)" filter="url(#flameGlow)"/>
+  <circle cx="258" cy="112" r="6" fill="white" opacity="0.9"/>
+
+  <!-- Spark trails from explosion -->
+  <g stroke-linecap="round" filter="url(#bombGlow)">
+    <line x1="258" y1="100" x2="258" y2="84" stroke="#ffcc00" stroke-width="2.5" opacity="0.8"/>
+    <line x1="268" y1="103" x2="280" y2="90" stroke="#ffaa00" stroke-width="2" opacity="0.7"/>
+    <line x1="247" y1="103" x2="235" y2="90" stroke="#ff6600" stroke-width="2" opacity="0.7"/>
+    <line x1="272" y1="112" x2="288" y2="108" stroke="#ffaa00" stroke-width="1.5" opacity="0.6"/>
+    <line x1="244" y1="112" x2="228" y2="108" stroke="#ff6600" stroke-width="1.5" opacity="0.6"/>
+    <line x1="270" y1="121" x2="284" y2="132" stroke="#ff4400" stroke-width="1.5" opacity="0.5"/>
+    <line x1="246" y1="121" x2="232" y2="132" stroke="#ff4400" stroke-width="1.5" opacity="0.5"/>
+    <!-- Tiny spark particles -->
+    <circle cx="262" cy="82" r="2" fill="#ffff00" opacity="0.9"/>
+    <circle cx="284" cy="86" r="1.5" fill="#ffcc00" opacity="0.8"/>
+    <circle cx="233" cy="88" r="1.5" fill="#ffaa00" opacity="0.7"/>
+    <circle cx="292" cy="105" r="1.5" fill="#ff8800" opacity="0.7"/>
+    <circle cx="222" cy="104" r="1.5" fill="#ff6600" opacity="0.6"/>
+  </g>
+
+  <!-- ===== FUSE ===== -->
+  <!-- Fuse cord — curly, hand-drawn feel -->
+  <path d="M 216 152 C 222 148, 228 144, 234 140 C 238 136, 242 132, 246 128 C 250 124, 253 120, 258 116" 
+        stroke="#8B6914" stroke-width="5" stroke-linecap="round" fill="none"/>
+  <!-- Fuse texture overlay -->
+  <path d="M 216 152 C 222 148, 228 144, 234 140 C 238 136, 242 132, 246 128 C 250 124, 253 120, 258 116" 
+        stroke="#6B4A0A" stroke-width="3" stroke-linecap="round" stroke-dasharray="3,4" fill="none" opacity="0.6"/>
+  <!-- Fuse mount knot on bomb -->
+  <circle cx="216" cy="152" r="7" fill="#5a3e10" stroke="#8B6914" stroke-width="2"/>
+
+  <!-- ===== BOMB BODY ===== -->
+  <!-- Drop shadow -->
+  <ellipse cx="200" cy="248" rx="85" ry="15" fill="#000" opacity="0.4"/>
+  
+  <!-- Main bomb sphere -->
+  <circle cx="196" cy="200" r="88" fill="url(#bombBody)"/>
+  <!-- Shine overlay -->
+  <circle cx="196" cy="200" r="88" fill="url(#bombShine)"/>
+  <!-- Edge stroke -->
+  <circle cx="196" cy="200" r="88" fill="none" stroke="#2a2a2a" stroke-width="3"/>
+  <!-- Inner rim highlight -->
+  <circle cx="196" cy="200" r="84" fill="none" stroke="#333" stroke-width="1" opacity="0.5"/>
+
+  <!-- Engraved T on bomb -->
+  <circle cx="196" cy="200" r="38" fill="none" stroke="#2a2a2a" stroke-width="2" opacity="0.6"/>
+  <text x="196" y="215" 
+        font-family="'Courier New', monospace" 
+        font-size="52" 
+        font-weight="900" 
+        fill="#ff3e3e" 
+        text-anchor="middle" 
+        filter="url(#bombGlow)"
+        opacity="0.9">T</text>
+
+  <!-- Bomb surface detail — rivets -->
+  <g fill="#2a2a2a" stroke="#333" stroke-width="1">
+    <circle cx="130" cy="168" r="5"/>
+    <circle cx="148" cy="128" r="5"/>
+    <circle cx="196" cy="116" r="5"/>
+    <circle cx="244" cy="128" r="5"/>
+    <circle cx="264" cy="168" r="4"/>
+    <circle cx="270" cy="218" r="4"/>
+    <circle cx="122" cy="218" r="4"/>
+    <circle cx="136" cy="258" r="5"/>
+    <circle cx="256" cy="258" r="5"/>
+    <circle cx="196" cy="284" r="5"/>
+  </g>
+  <!-- Rivet inner highlight -->
+  <g fill="#3a3a3a">
+    <circle cx="130" cy="167" r="2"/>
+    <circle cx="148" cy="127" r="2"/>
+    <circle cx="196" cy="115" r="2"/>
+    <circle cx="244" cy="127" r="2"/>
+    <circle cx="264" cy="167" r="1.5"/>
+  </g>
+
+  <!-- TANTRUMS text below -->
+  <text x="200" y="372" 
+        font-family="'Courier New', monospace" 
+        font-size="23" 
+        font-weight="900" 
+        fill="#ff3e3e" 
+        text-anchor="middle" 
+        letter-spacing="7"
+        filter="url(#bombGlow)">TANTRUMS</text>
+  
+  <text x="200" y="391"
+        font-family="'Courier New', monospace"
+        font-size="9"
+        fill="#444"
+        text-anchor="middle"
+        letter-spacing="4">.42AHH · .trinitrotoluene · LLVM</text>
+</svg>
