@@ -32,8 +32,10 @@ TABLE OF CONTENTS
  12.  Error Handling (try / catch / throw)
  13.  Imports
  14.  Built-in Functions
+ 14.5 Math Standard Library
  15.  Profiling & Timing API
  16.  Memory Profiling API
+ 16.5 Filesystem Standard Library
  17.  Type System & Modes
  18.  Compile-Time Diagnostics
  19.  Runtime Behavior & Errors
@@ -48,7 +50,6 @@ TABLE OF CONTENTS
 ================================================================================
 
 
-EAD
   tantrums build <file.42AHH | file.trinitrotoluene>
       Compile .42AHH or .trinitrotoluene to a native executable via LLVM.
       Only files with the .42AHH or .trinitrotoluene extension are permitted.
@@ -71,6 +72,7 @@ EAD
 
   On startup the runtime prints mode info:
     [Tantrums] Mode: both (typed + dynamic)
+    [Tantrums] Imported native standard library 'filesystem'   (if use filesystem; present)
     [Tantrums] Built: main.exe
 
   The generated executable is platform-specific. Compile on Windows for Windows,
@@ -614,7 +616,7 @@ POINTER SIZE IN REPORTS
 10. AUTO-FREE SYSTEM (ESCAPE ANALYSIS)
 ================================================================================
 
-  NOTE: 7 layers memory safety system isnt working rightnow.
+  NOTE: The 7-layer memory safety system is not fully operational at this time.
 
   When #autoFree true (default), the compiler and runtime automatically
   manage pointers, lists, and maps that are provably local. Two-layer system:
@@ -912,6 +914,136 @@ TRY / CATCH
   bytesToGB(bytes) -> float     bytes / (1024^3)
 
   All conversion functions accept int or float.
+
+
+================================================================================
+16.5 FILESYSTEM STANDARD LIBRARY
+================================================================================
+
+  Import:
+    use filesystem;
+
+  After importing, all functions are accessed as filesystem.funcname(args).
+  Follows the same native stdlib pattern as math (use math;).
+  All 17 functions compile directly to native LLVM calls — no dispatch overhead.
+
+--------------------------------------------------------------------------------
+${USERHOME} PATH VARIABLE
+--------------------------------------------------------------------------------
+
+  Any path string passed to a filesystem function may contain ${USERHOME}.
+  It is resolved at runtime before any file operation:
+
+    Windows  ->  replaced with getenv("USERPROFILE")
+    macOS    ->  replaced with getenv("HOME")
+    Linux    ->  replaced with getenv("HOME")
+
+  If the environment variable is null, a catchable runtime error is thrown:
+    "${USERHOME} could not be resolved on this system"
+
+  If the path does not contain ${USERHOME}, it is returned unchanged.
+
+  Example:
+    filesystem.read("${USERHOME}/notes.txt")
+    filesystem.mkdir("${USERHOME}/myapp/data")
+
+--------------------------------------------------------------------------------
+FUNCTIONS
+--------------------------------------------------------------------------------
+
+  filesystem.read(path) -> string
+      Read entire file contents as a single string.
+      Throws if file not found or unreadable.
+
+  filesystem.write(path, data) -> bool
+      Create or overwrite a file with the given string content.
+      Returns true on success.
+
+  filesystem.append(path, data) -> bool
+      Append string content to an existing or new file.
+      Returns true on success.
+
+  filesystem.exists(path) -> bool
+      Returns true if the path points to any existing file or directory.
+
+  filesystem.delete(path) -> bool
+      Delete a file at the given path.
+      Returns true on success.
+
+  filesystem.mkdir(path) -> bool
+      Create a directory and all missing parent directories (like mkdir -p).
+      Returns true on success. No-ops silently if directory already exists.
+
+  filesystem.mkfile(path) -> bool
+      Create an empty file at the given path.
+      Automatically creates all missing parent directories.
+      If the file already exists, does nothing and returns true.
+
+  filesystem.listdir(path) -> list
+      Returns a Tantrums list of filename strings in the given directory.
+      Throws if path does not exist or is not a directory.
+
+  filesystem.isfile(path) -> bool
+      Returns true if path points to a regular file (not a directory).
+
+  filesystem.isdir(path) -> bool
+      Returns true if path points to a directory.
+
+  filesystem.copy(src, dst) -> bool
+      Copy a file from src to dst.
+      Returns true on success.
+
+  filesystem.move(src, dst) -> bool
+      Move or rename a file or directory.
+      Returns true on success.
+
+  filesystem.size(path) -> int
+      Returns file size in bytes.
+      Returns -1 if path does not exist or is not a regular file.
+
+  filesystem.readlines(path) -> list
+      Read file and return a Tantrums list of strings, one per line.
+      Newline characters are stripped from each entry.
+      Throws if file not found or unreadable.
+
+  filesystem.writelines(path, lines) -> bool
+      Accept a Tantrums list of strings and write each as a line.
+      Joins with \n and appends a final trailing \n.
+      Returns true on success.
+
+  filesystem.cwd() -> string
+      Returns the current working directory as an absolute path string.
+
+  filesystem.abspath(path) -> string
+      Resolve a relative path to its absolute form.
+      Returns the absolute path string.
+
+--------------------------------------------------------------------------------
+ERROR HANDLING
+--------------------------------------------------------------------------------
+
+  All I/O errors, permission errors, and path errors throw catchable Tantrums
+  runtime errors. Programs should wrap filesystem calls in try/catch:
+
+    try
+    {
+        string data = filesystem.read("${USERHOME}/missing.txt");
+    }
+    catch (e)
+    {
+        print("File error: " + e);
+    }
+
+--------------------------------------------------------------------------------
+IMPLEMENTATION NOTES
+--------------------------------------------------------------------------------
+
+  Uses std::filesystem (C++17/23) for all path and directory operations.
+  Uses std::fstream / std::ifstream / std::ofstream for file I/O.
+  Source files: src/stdlib/filesystem.cpp, include/stdlib/filesystem.h
+  Wired via main.cpp (use stripping) and LLVMCodegen.cpp (call interception).
+  This is the first stdlib module that performs I/O and throws catchable
+  runtime errors, establishing the error-throwing pattern for future I/O modules.
 
 
 ================================================================================
@@ -1279,20 +1411,59 @@ RETURN TYPE ENFORCEMENT BY MODE
       for ch in "Tantrums" { print(ch); }
   }
 
+-- FILESYSTEM -----------------------------------------------------------------
+
+  use filesystem;
+
+  tantrum void main()
+  {
+      string dir  = "${USERHOME}/tantrums_test";
+      string file = "${USERHOME}/tantrums_test/hello.txt";
+
+      filesystem.mkdir(dir);
+      filesystem.write(file, "Hello from Tantrums!");
+      print(filesystem.read(file));          // Hello from Tantrums!
+
+      filesystem.append(file, "\nLine two");
+      list lines = filesystem.readlines(file);
+      print(len(lines));                     // 2
+      print(lines[0]);                       // Hello from Tantrums!
+
+      print(filesystem.exists(file));        // true
+      print(filesystem.isfile(file));        // true
+      print(filesystem.isdir(dir));          // true
+      print(filesystem.size(file));          // byte count
+
+      filesystem.delete(file);
+      print(filesystem.exists(file));        // false
+
+      try
+      {
+          string bad = filesystem.read("${USERHOME}/doesnotexist.txt");
+      }
+      catch (e)
+      {
+          print("Caught: " + e);
+      }
+  }
+
 
 ================================================================================
 23. KNOWN LIMITATIONS & TBD FEATURES
 ================================================================================
 
   Not yet implemented (as of this source snapshot):
-    Math module:         use math;  (sin, cos, sqrt, pow, abs, floor, ceil)
-    File system:         use fs;    (read, write, append, exists, delete)
     C/C++ FFI:           foreign "C" { ... }
     Graphics:            OpenGL / Vulkan modules
     Window creation:     Win32 / GLFW / SDL2
     Audio
     Networking
     Package manager
+
+  Implemented stdlib modules:
+    Math:        use math;        (sin, cos, tan, sec, cosec, cot, floor, ceil, random_int, random_float)
+    Filesystem:  use filesystem;  (read, write, append, exists, delete, mkdir, mkfile, listdir,
+                                   isfile, isdir, copy, move, size, readlines, writelines, cwd, abspath)
 
   Hard limits (from compiler/runtime source):
     64        max imports per file (array in compile_source)

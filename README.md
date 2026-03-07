@@ -263,6 +263,12 @@ Nested `try` blocks work correctly. Rethrowing from inside a `catch` works corre
 
 Math functions are not looked up in a dictionary at runtime. The compiler identifies `math.*` calls during AST traversal and fuses them directly into native LLVM math intrinsics — `sin`, `cos`, `tan`, `sec`, `cosec`, `cot`, `floor`, `ceil`, `random_int`, `random_float`. There is no map lookup, no function dispatch overhead, no hash collision to resolve. It's a direct instruction.
 
+### The Filesystem Library
+
+File I/O is available via `use filesystem;`. All 17 functions (`read`, `write`, `append`, `exists`, `delete`, `mkdir`, `mkfile`, `listdir`, `isfile`, `isdir`, `copy`, `move`, `size`, `readlines`, `writelines`, `cwd`, `abspath`) compile directly to native LLVM calls — same zero-dispatch pattern as the math library.
+
+All path arguments support the `${USERHOME}` prefix, resolved at runtime to `USERPROFILE` on Windows and `HOME` on macOS/Linux. All I/O errors throw catchable Tantrums runtime errors, so any filesystem call can be wrapped in `try`/`catch`. This is the first stdlib module that performs I/O, establishing the error-throwing pattern for all future I/O modules.
+
 ### Imports
 
 Tantrums uses a source-injection import model. When you `use "file.42AHH"`, the imported file is lexed, parsed, and its top-level declarations are injected inline into the current compilation. The imported file's own `#mode`, `#autoFree`, and `#allowMemoryLeaks` directives apply independently to its declarations — mixed-mode imports work correctly. Circular imports are detected and prevented. Duplicate imports of the same file are silently deduplicated.
@@ -363,7 +369,7 @@ Tantrums ships an officially bundled VS Code extension in the `tantrums-vscode/`
 
 **What you get:**
 
-- **Syntax highlighting** — Full coverage of keywords, directives, type annotations, control flow, math library calls, built-ins, string escapes, and comments. Distinct colors for every semantic layer.
+- **Syntax highlighting** — Full coverage of keywords, directives, type annotations, control flow, math library calls, filesystem library calls, built-ins, string escapes, and comments. Distinct colors for every semantic layer.
 - **IntelliSense & snippets** — 30+ snippet definitions for loop structures, mode directives, pointer patterns, switch blocks, try/catch, and file-level directive combinations. Tab-completeable, parameter-aware.
 - **Hover documentation** — Hover any keyword, built-in function, or memory command to see its return type signature and usage documentation inline.
 - **Live diagnostics** — On-save parsing that surfaces memory leak patterns, type checking violations, unresolved identifiers, and dead-branch logic directly in the editor gutter.
@@ -377,10 +383,10 @@ Tantrums ships an officially bundled VS Code extension in the `tantrums-vscode/`
 Tantrums just completed the most significant architectural shift in its history: ripping out the stack-based bytecode VM entirely and replacing it with a full LLVM native compilation pipeline. That transition is complete. Here's where it goes from here:
 
 ### v1.0 — Current
-Full LLVM native codegen. try/catch exception handling via C setjmp/longjmp. Math library AST intrinsic fusion. File-level mode enforcement. VS Code extension. Comprehensive leak and auto-free reporting.
+Full LLVM native codegen. try/catch exception handling via C setjmp/longjmp. Math library AST intrinsic fusion. Filesystem stdlib with full cross-platform file and directory I/O, `${USERHOME}` path resolution, and catchable runtime errors for all I/O failures. File-level mode enforcement. VS Code extension. Comprehensive leak and auto-free reporting.
 
 ### v2.0 — The Standard Integration
-Full restoration of the 7-layer escape analysis system, rewritten in pure LLVM IR (not bytecode-layer as before). Slab allocation optimizations to outperform standard `malloc` on repeated alloc/free cycles. Filesystem module (`fs`) with read, write, append, exists, and delete. IO module abstractions.
+Full restoration of the 7-layer escape analysis system, rewritten in pure LLVM IR (not bytecode-layer as before). Slab allocation optimizations to outperform standard `malloc` on repeated alloc/free cycles. IO module abstractions. String module (split, trim, replace, indexOf, substring, toLower, toUpper).
 
 ### v3.0 — The Graphical Standard
 Win32 windowing module wrappers accessible from within typed Tantrums code. Native OpenGL pipeline bindings. This is the version that makes Tantrums viable as a game scripting layer.
@@ -389,7 +395,7 @@ Win32 windowing module wrappers accessible from within typed Tantrums code. Nati
 Link-Time Optimization (LTO). Aggressive static branch elimination. Automatic SIMD vectorization injection by the compiler for recognized loop patterns. The version where Tantrums stops being fast and starts being unreasonable.
 
 **Not yet implemented (as of current snapshot):**
-File I/O · C/C++ FFI · Networking · Audio · Package manager · Address-of operator (`&`)
+C/C++ FFI · Networking · Audio · Package manager · Address-of operator (`&`) · String module · IO module
 
 <br>
 
@@ -425,9 +431,16 @@ tantrums/
 │   ├── compiler.cpp          AST → semantic validation, type checking, escape analysis
 │   ├── LLVMCodegen.cpp       AST → LLVM IR → native machine binary
 │   ├── runtime.cpp           Exception handling, scope tracking, profiling API
-│   └── value.cpp             NaN-boxed value structs, string interning
+│   ├── value.cpp             NaN-boxed value structs, string interning
+│   └── stdlib/
+│       ├── maths.cpp         Math standard library (use math;)
+│       └── filesystem.cpp    Filesystem standard library (use filesystem;)
 │
-├── include/                  System headers and runtime interface definitions
+├── include/
+│   ├── stdlib/
+│   │   ├── maths.h           Math stdlib header
+│   │   └── filesystem.h      Filesystem stdlib header
+│   └── ...                   Other system headers and runtime interface definitions
 │
 ├── external/
 │   └── llvm-backend/         LLVM v16 static libraries for native codegen

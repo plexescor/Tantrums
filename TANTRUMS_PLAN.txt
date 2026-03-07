@@ -7,7 +7,7 @@ This file is the single source of truth for the Tantrums language.
 Any AI or developer working on this project should read this FIRST.
 Expand sections as decisions are made. Mark undecided items with [TBD].
 
-Last updated: 2026-02-28
+Last updated: 2026-03-07
 
 
 ================================================================================
@@ -291,8 +291,13 @@ Rules:
   - Circular imports prevented
   - Imported functions available for type checking
 
+Native standard library modules (use keyword, no file path needed):
+  use math;           sin, cos, tan, sec, cosec, cot, floor, ceil, random_int, random_float
+  use filesystem;     read, write, append, exists, delete, mkdir, mkfile, listdir,
+                      isfile, isdir, copy, move, size, readlines, writelines, cwd, abspath
+
 Planned future modules:
-  v2.0: math, fs, io
+  v2.0: io, string
   v3.0: window (Win32/GLFW/SDL2), graphics (OpenGL)
   v4.0: graphics-vulkan, audio, net
 
@@ -341,7 +346,13 @@ Project structure:
     value.cpp             Value types, string interning
     memory.cpp            Leak detection, tracking, log generation
     ast.cpp               AST node allocation/deallocation
+    stdlib/
+      maths.cpp           Math standard library (use math;)
+      filesystem.cpp      Filesystem standard library (use filesystem;)
   include/                Header files
+    stdlib/
+      maths.h             Math stdlib header
+      filesystem.h        Filesystem stdlib header
   tantrums-vscode/        VS Code extension
 
 Native design:
@@ -398,10 +409,14 @@ v1.0 — stability + bug fixes (next):
   [ ] Write WHY.md (design decisions documented)
   [ ] Build one real demo program (snake, calculator, or similar)
   [x] Math module (sin, cos, tan, sec, cosec, cot, floor, ceil, random_int, random_float)
+  [x] Filesystem module (read, write, append, exists, delete, mkdir, mkfile, listdir,
+                          isfile, isdir, copy, move, size, readlines, writelines, cwd, abspath)
+      - ${USERHOME} path variable (Windows: USERPROFILE, macOS/Linux: HOME)
+      - All errors throw catchable Tantrums runtime errors
+      - Cross-platform: Windows, Linux, macOS
 
 v2.0 — standard library:
   [ ] Slab allocator (replace malloc for small objects, 5-10x allocation speed)
-  [ ] fs module (read, write, append, exists, delete, listdir)
   [ ] io module
   [ ] String module (split, trim, replace, indexOf, substring, toLower, toUpper)
   [ ] Reference counting for pointer-in-container ownership
