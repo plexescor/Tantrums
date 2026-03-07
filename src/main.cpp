@@ -166,8 +166,8 @@ static ASTNode* prepare_ast(char* source, const char* source_path, CompileMode* 
             ASTNode* n = ast->as.program.nodes[i];
             if (n->type != NODE_USE) continue;
             
-            if (strcmp(n->as.use_file, "math") == 0) {
-                printf("[Tantrums] Imported native standard library 'math'\n");
+            if (strcmp(n->as.use_file, "math") == 0 || strcmp(n->as.use_file, "filesystem") == 0) {
+                printf("[Tantrums] Imported native standard library '%s'\n", n->as.use_file);
                 memmove(&ast->as.program.nodes[i], &ast->as.program.nodes[i + 1],
                         sizeof(ASTNode*) * (ast->as.program.count - i - 1));
                 ast->as.program.count--;

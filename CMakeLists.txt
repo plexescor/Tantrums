@@ -56,7 +56,8 @@ set(RUNTIME_SOURCES
     "${CMAKE_SOURCE_DIR}/src/memory.cpp"
     "${CMAKE_SOURCE_DIR}/src/table.cpp"
     "${CMAKE_SOURCE_DIR}/src/chunk.cpp"
-    "${CMAKE_SOURCE_DIR}/src/stdlib/maths.cpp")
+    "${CMAKE_SOURCE_DIR}/src/stdlib/maths.cpp"
+    "${CMAKE_SOURCE_DIR}/src/stdlib/filesystem.cpp")
 set(RUNTIME_LIB "${CMAKE_BINARY_DIR}/tantrums_rt.lib")
 
 # Compile each source to .obj
@@ -107,6 +108,7 @@ set(SOURCES
     src/token.cpp
     src/value.cpp
     src/stdlib/maths.cpp
+    src/stdlib/filesystem.cpp
     src/bytecode_file.cpp
 )
 

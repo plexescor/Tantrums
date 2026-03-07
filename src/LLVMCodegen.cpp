@@ -223,6 +223,26 @@ static void declareRuntimeFunctions(Codegen& cg) {
     decl("rt_math_ceil",         i64, {i64});
     decl("rt_math_random_int",   i64, {i64, i64});
     decl("rt_math_random_float", i64, {i64, i64});
+    decl("rt_math_sqrt",         i64, {i64});
+    decl("rt_math_pow",          i64, {i64, i64});
+    decl("rt_math_cbrt",         i64, {i64});
+    decl("rt_filesystem_read",         i64, {i64});
+    decl("rt_filesystem_write",        i64, {i64, i64});
+    decl("rt_filesystem_append",       i64, {i64, i64});
+    decl("rt_filesystem_exists",       i64, {i64});
+    decl("rt_filesystem_delete",       i64, {i64});
+    decl("rt_filesystem_mkdir",        i64, {i64});
+    decl("rt_filesystem_mkfile",       i64, {i64});
+    decl("rt_filesystem_listdir",      i64, {i64});
+    decl("rt_filesystem_isfile",       i64, {i64});
+    decl("rt_filesystem_isdir",        i64, {i64});
+    decl("rt_filesystem_copy",         i64, {i64, i64});
+    decl("rt_filesystem_move",         i64, {i64, i64});
+    decl("rt_filesystem_size",         i64, {i64});
+    decl("rt_filesystem_readlines",    i64, {i64});
+    decl("rt_filesystem_writelines",   i64, {i64, i64});
+    decl("rt_filesystem_cwd",          i64, {});
+    decl("rt_filesystem_abspath",      i64, {i64});
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -373,7 +393,30 @@ static llvm::Value* codegenExpr(Codegen& cg, ASTNode* node) {
                 if (strcmp(prop_name, "ceil") == 0 && argc >= 1) return cg.callRT("rt_math_ceil", {codegenExpr(cg, node->as.call.args[0])});
                 if (strcmp(prop_name, "random_int") == 0 && argc >= 2) return cg.callRT("rt_math_random_int", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
                 if (strcmp(prop_name, "random_float") == 0 && argc >= 2) return cg.callRT("rt_math_random_float", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
+                if (strcmp(prop_name, "sqrt") == 0 && argc >= 1) return cg.callRT("rt_math_sqrt", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "pow") == 0 && argc >= 2) return cg.callRT("rt_math_pow", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
+                if (strcmp(prop_name, "cbrt") == 0 && argc >= 1) return cg.callRT("rt_math_cbrt", {codegenExpr(cg, node->as.call.args[0])});
+            } else if (strcmp(obj_name, "filesystem") == 0) {
+                if (strcmp(prop_name, "read") == 0 && argc >= 1) return cg.callRT("rt_filesystem_read", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "write") == 0 && argc >= 2) return cg.callRT("rt_filesystem_write", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
+                if (strcmp(prop_name, "append") == 0 && argc >= 2) return cg.callRT("rt_filesystem_append", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
+                if (strcmp(prop_name, "exists") == 0 && argc >= 1) return cg.callRT("rt_filesystem_exists", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "delete") == 0 && argc >= 1) return cg.callRT("rt_filesystem_delete", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "mkdir") == 0 && argc >= 1) return cg.callRT("rt_filesystem_mkdir", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "mkfile") == 0 && argc >= 1) return cg.callRT("rt_filesystem_mkfile", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "listdir") == 0 && argc >= 1) return cg.callRT("rt_filesystem_listdir", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "isfile") == 0 && argc >= 1) return cg.callRT("rt_filesystem_isfile", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "isdir") == 0 && argc >= 1) return cg.callRT("rt_filesystem_isdir", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "copy") == 0 && argc >= 2) return cg.callRT("rt_filesystem_copy", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
+                if (strcmp(prop_name, "move") == 0 && argc >= 2) return cg.callRT("rt_filesystem_move", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
+                if (strcmp(prop_name, "size") == 0 && argc >= 1) return cg.callRT("rt_filesystem_size", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "readlines") == 0 && argc >= 1) return cg.callRT("rt_filesystem_readlines", {codegenExpr(cg, node->as.call.args[0])});
+                if (strcmp(prop_name, "writelines") == 0 && argc >= 2) return cg.callRT("rt_filesystem_writelines", {codegenExpr(cg, node->as.call.args[0]), codegenExpr(cg, node->as.call.args[1])});
+                if (strcmp(prop_name, "cwd") == 0 && argc >= 0) return cg.callRT("rt_filesystem_cwd", {});
+                if (strcmp(prop_name, "abspath") == 0 && argc >= 1) return cg.callRT("rt_filesystem_abspath", {codegenExpr(cg, node->as.call.args[0])});
             }
+            
+            // Generate normal lookup (will fail at runtime since it's not actually an object, but this matches maths.cpp)
         }
 
         if (callee->type != NODE_IDENTIFIER) return cg.makeNull();

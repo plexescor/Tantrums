@@ -103,4 +103,23 @@ extern "C" {
         double r = (double)rand() / RAND_MAX;
         return value_to_tv_math(FLOAT_VAL(mn + r * (mx - mn)));
     }
+    TantrumsValue rt_math_sqrt(TantrumsValue x_tv) {
+        Value x = tv_to_value_math(x_tv);
+        double d;
+        if (!get_number(x, &d)) return value_to_tv_math(FLOAT_VAL(0.0));
+        return value_to_tv_math(FLOAT_VAL(std::sqrt(d)));
+    }
+    TantrumsValue rt_math_pow(TantrumsValue base_tv, TantrumsValue exp_tv) {
+        Value base_val = tv_to_value_math(base_tv);
+        Value exp_val = tv_to_value_math(exp_tv);
+        double b, e;
+        if (!get_number(base_val, &b) || !get_number(exp_val, &e)) return value_to_tv_math(FLOAT_VAL(0.0));
+        return value_to_tv_math(FLOAT_VAL(std::pow(b, e)));
+    }
+    TantrumsValue rt_math_cbrt(TantrumsValue x_tv) {
+        Value x = tv_to_value_math(x_tv);
+        double d;
+        if (!get_number(x, &d)) return value_to_tv_math(FLOAT_VAL(0.0));
+        return value_to_tv_math(FLOAT_VAL(std::cbrt(d)));
+    }
 }
