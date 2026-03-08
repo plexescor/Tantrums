@@ -66,9 +66,11 @@ struct Codegen {
 
     /* locals: name → alloca of i64 */
     std::vector<std::map<std::string, llvm::AllocaInst*>> scopes;
+    std::vector<std::map<std::string, std::string>> typeScopes;
 
     /* globals: name → GlobalVariable (i64) */
     std::map<std::string, llvm::GlobalVariable*> globals;
+    std::map<std::string, std::string> globalTypes;
 
     /* user function map */
     std::map<std::string, llvm::Function*> userFuncs;
@@ -87,8 +89,8 @@ struct Codegen {
         return tmpB.CreateAlloca(i64Ty, nullptr, name);
     }
 
-    void pushScope() { scopes.emplace_back(); }
-    void popScope()  { if (!scopes.empty()) scopes.pop_back(); }
+    void pushScope() { scopes.emplace_back(); typeScopes.emplace_back(); }
+    void popScope()  { if (!scopes.empty()) scopes.pop_back(); if (!typeScopes.empty()) typeScopes.pop_back(); }
 
     llvm::AllocaInst* lookupLocal(const std::string& name) {
         for (int i = (int)scopes.size() - 1; i >= 0; i--) {
@@ -98,8 +100,11 @@ struct Codegen {
         return nullptr;
     }
 
-    void setLocal(const std::string& name, llvm::AllocaInst* a) {
-        if (!scopes.empty()) scopes.back()[name] = a;
+    void setLocal(const std::string& name, llvm::AllocaInst* a, const char* typeName = nullptr) {
+        if (!scopes.empty()) {
+            scopes.back()[name] = a;
+            if (typeName) typeScopes.back()[name] = typeName;
+        }
     }
 
     llvm::Value* makeInt(int64_t n)  { return llvm::ConstantInt::get(i64Ty, tv_int(n)); }
@@ -137,6 +142,55 @@ static void prescan(Codegen& cg, ASTNode* program);
 static void codegenProgram(Codegen& cg, ASTNode* program);
 static void codegenStmt(Codegen& cg, ASTNode* node);
 static llvm::Value* codegenExpr(Codegen& cg, ASTNode* node);
+
+static const char* llvm_infer_expr_type(Codegen& cg, ASTNode* node) {
+    if (!node) return nullptr;
+    switch (node->type) {
+    case NODE_INT_LIT:    return "int";
+    case NODE_FLOAT_LIT:  return "float";
+    case NODE_STRING_LIT: return "string";
+    case NODE_BOOL_LIT:   return "bool";
+    case NODE_NULL_LIT:   return "null";
+    case NODE_LIST_LIT:   return "list";
+    case NODE_MAP_LIT:    return "map";
+    case NODE_IDENTIFIER: {
+        for (int i = (int)cg.typeScopes.size() - 1; i >= 0; i--) {
+            auto it = cg.typeScopes[i].find(node->as.identifier.name);
+            if (it != cg.typeScopes[i].end()) return it->second.c_str();
+        }
+        auto it = cg.globalTypes.find(node->as.identifier.name);
+        if (it != cg.globalTypes.end()) return it->second.c_str();
+        return nullptr;
+    }
+    case NODE_CALL: {
+        if (node->as.call.callee->type == NODE_IDENTIFIER) {
+            auto it = cg.funcSigs.find(node->as.call.callee->as.identifier.name);
+            if (it != cg.funcSigs.end() && !it->second.ret_type.empty()) {
+                return it->second.ret_type.c_str();
+            }
+        }
+        return nullptr;
+    }
+    case NODE_BINARY: {
+        const char* lt = llvm_infer_expr_type(cg, node->as.binary.left);
+        const char* rt = llvm_infer_expr_type(cg, node->as.binary.right);
+        TokenType op = node->as.binary.op;
+        if (op == TOKEN_EQUAL_EQUAL || op == TOKEN_BANG_EQUAL ||
+            op == TOKEN_LESS || op == TOKEN_GREATER ||
+            op == TOKEN_LESS_EQUAL || op == TOKEN_GREATER_EQUAL ||
+            op == TOKEN_AND || op == TOKEN_OR)
+            return "bool";
+        if (op == TOKEN_PLUS && ((lt && strcmp(lt, "string") == 0) || (rt && strcmp(rt, "string") == 0)))
+            return "string";
+        if ((lt && strcmp(lt, "float") == 0) || (rt && strcmp(rt, "float") == 0))
+            return "float";
+        if (lt && strcmp(lt, "int") == 0 && rt && strcmp(rt, "int") == 0)
+            return "int";
+        return lt; 
+    }
+    default: return nullptr;
+    }
+}
 
 /* ══════════════════════════════════════════════════════════════════
  *  Runtime function declarations
@@ -354,6 +408,95 @@ static llvm::Value* codegenExpr(Codegen& cg, ASTNode* node) {
 
         llvm::Value* lhs = codegenExpr(cg, node->as.binary.left);
         llvm::Value* rhs = codegenExpr(cg, node->as.binary.right);
+
+        /* Fast path for known types */
+        if (cg.mode == MODE_STATIC || cg.mode == MODE_BOTH) {
+            const char* lt = llvm_infer_expr_type(cg, node->as.binary.left);
+            const char* rt = llvm_infer_expr_type(cg, node->as.binary.right);
+
+            if (lt && rt && (strcmp(lt, "int") == 0 || strcmp(lt, "float") == 0) &&
+                            (strcmp(rt, "int") == 0 || strcmp(rt, "float") == 0)) {
+                
+                bool l_is_int = (strcmp(lt, "int") == 0);
+                bool r_is_int = (strcmp(rt, "int") == 0);
+                
+                llvm::Value* l_val = lhs;
+                llvm::Value* r_val = rhs;
+                
+                /* Unbox */
+                if (l_is_int) {
+                    l_val = cg.B->CreateAnd(l_val, 0x0000FFFFFFFFFFFFULL);
+                    l_val = cg.B->CreateShl(l_val, 16);
+                    l_val = cg.B->CreateAShr(l_val, 16);
+                } else {
+                    l_val = cg.B->CreateBitCast(l_val, cg.B->getDoubleTy());
+                }
+                
+                if (r_is_int) {
+                    r_val = cg.B->CreateAnd(r_val, 0x0000FFFFFFFFFFFFULL);
+                    r_val = cg.B->CreateShl(r_val, 16);
+                    r_val = cg.B->CreateAShr(r_val, 16);
+                } else {
+                    r_val = cg.B->CreateBitCast(r_val, cg.B->getDoubleTy());
+                }
+                
+                /* Promote to float if mixed */
+                bool is_float_op = !l_is_int || !r_is_int;
+                if (is_float_op) {
+                    if (l_is_int) l_val = cg.B->CreateSIToFP(l_val, cg.B->getDoubleTy());
+                    if (r_is_int) r_val = cg.B->CreateSIToFP(r_val, cg.B->getDoubleTy());
+                }
+                
+                llvm::Value* res = nullptr;
+                bool is_cmp = false;
+                
+                if (is_float_op) {
+                    switch (node->as.binary.op) {
+                    case TOKEN_PLUS:    res = cg.B->CreateFAdd(l_val, r_val); break;
+                    case TOKEN_MINUS:   res = cg.B->CreateFSub(l_val, r_val); break;
+                    case TOKEN_STAR:    res = cg.B->CreateFMul(l_val, r_val); break;
+                    case TOKEN_SLASH:   res = cg.B->CreateFDiv(l_val, r_val); break;
+                    case TOKEN_EQUAL_EQUAL: res = cg.B->CreateFCmpOEQ(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_BANG_EQUAL:  res = cg.B->CreateFCmpONE(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_LESS:        res = cg.B->CreateFCmpOLT(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_GREATER:     res = cg.B->CreateFCmpOGT(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_LESS_EQUAL:  res = cg.B->CreateFCmpOLE(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_GREATER_EQUAL: res = cg.B->CreateFCmpOGE(l_val, r_val); is_cmp = true; break;
+                    default: /* e.g. TOKEN_PERCENT */ break; // will leave res as nullptr, so it falls back
+                    }
+                } else {
+                    switch (node->as.binary.op) {
+                    case TOKEN_PLUS:    res = cg.B->CreateAdd(l_val, r_val); break;
+                    case TOKEN_MINUS:   res = cg.B->CreateSub(l_val, r_val); break;
+                    case TOKEN_STAR:    res = cg.B->CreateMul(l_val, r_val); break;
+                    case TOKEN_SLASH:   res = cg.B->CreateSDiv(l_val, r_val); break;
+                    case TOKEN_PERCENT: res = cg.B->CreateSRem(l_val, r_val); break;
+                    case TOKEN_EQUAL_EQUAL: res = cg.B->CreateICmpEQ(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_BANG_EQUAL:  res = cg.B->CreateICmpNE(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_LESS:        res = cg.B->CreateICmpSLT(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_GREATER:     res = cg.B->CreateICmpSGT(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_LESS_EQUAL:  res = cg.B->CreateICmpSLE(l_val, r_val); is_cmp = true; break;
+                    case TOKEN_GREATER_EQUAL: res = cg.B->CreateICmpSGE(l_val, r_val); is_cmp = true; break;
+                    default: break;
+                    }
+                }
+                
+                if (res) {
+                    /* Re-box */
+                    if (is_cmp) {
+                        res = cg.B->CreateZExt(res, cg.i64Ty);
+                        return cg.B->CreateOr(res, 0xFFFB000000000000ULL); /* TV_TAG_BOOL */
+                    } else if (is_float_op) {
+                        return cg.B->CreateBitCast(res, cg.i64Ty);
+                    } else {
+                        res = cg.B->CreateAnd(res, 0x0000FFFFFFFFFFFFULL);
+                        return cg.B->CreateOr(res, 0xFFFA000000000000ULL); /* TV_TAG_INT */
+                    }
+                }
+            }
+        }
+
+        /* Fallback */
         switch (node->as.binary.op) {
         case TOKEN_PLUS:          return cg.callRT("rt_add", {lhs, rhs});
         case TOKEN_MINUS:         return cg.callRT("rt_sub", {lhs, rhs});
@@ -621,12 +764,13 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
         if (cg.scopes.size() > 1) {
             llvm::AllocaInst* a = cg.createEntryAlloca(cg.curFunc, name);
             cg.B->CreateStore(init, a);
-            cg.setLocal(name, a);
+            cg.setLocal(name, a, node->as.var_decl.type_name);
         } else {
             auto* gv = new llvm::GlobalVariable(*cg.mod, cg.i64Ty, false,
                                                 llvm::GlobalValue::InternalLinkage,
                                                 llvm::ConstantInt::get(cg.i64Ty, TV_NULL), name);
             cg.globals[name] = gv;
+            if (node->as.var_decl.type_name) cg.globalTypes[name] = node->as.var_decl.type_name;
             cg.B->CreateStore(init, gv);
         }
         break;
@@ -737,7 +881,7 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
             std::string pname = node->as.func_decl.params[pi].name;
             llvm::AllocaInst* a = cg.createEntryAlloca(fn, pname);
             cg.B->CreateStore(&arg, a);
-            cg.setLocal(pname, a);
+            cg.setLocal(pname, a, node->as.func_decl.params[pi].type_name);
             pi++;
         }
         ASTNode* body = node->as.func_decl.body;

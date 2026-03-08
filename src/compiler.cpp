@@ -155,7 +155,7 @@ static void prescan_directives(ASTNode* program) {
 }
 
 /* ── Type inference (returns type name or nullptr for dynamic) ── */
-static const char* infer_expr_type(ASTNode* node) {
+const char* infer_expr_type(ASTNode* node) {
     if (!node) return nullptr;
     switch (node->type) {
     case NODE_INT_LIT:    return "int";
