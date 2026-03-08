@@ -5,6 +5,14 @@
 #include <string>
 #include <iostream>
 
+#ifdef _WIN32
+#include <windows.h>
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h>
+#elif defined(__linux__)
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 
 // ══════════════════════════════════════════════════════════════════
@@ -65,6 +73,48 @@ static std::string get_string_arg(TantrumsValue tv, const char* func_name, const
     return std::string(AS_CSTRING(v));
 }
 
+static std::string get_exe_dir() {
+#ifdef _WIN32
+    wchar_t buf[MAX_PATH];
+    if (GetModuleFileNameW(NULL, buf, MAX_PATH) == 0) {
+        rt_throw(rt_string_from_cstr("resolve_exe_relative: could not determine executable path"));
+    }
+    return fs::path(buf).parent_path().string();
+#elif defined(__APPLE__)
+    char buf[1024];
+    uint32_t size = sizeof(buf);
+    if (_NSGetExecutablePath(buf, &size) != 0) {
+        rt_throw(rt_string_from_cstr("resolve_exe_relative: could not determine executable path"));
+    }
+    return fs::path(buf).parent_path().string();
+#elif defined(__linux__)
+    char buf[1024];
+    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (len == -1) {
+        rt_throw(rt_string_from_cstr("resolve_exe_relative: could not determine executable path"));
+    }
+    buf[len] = '\0';
+    return fs::path(buf).parent_path().string();
+#else
+    rt_throw(rt_string_from_cstr("resolve_exe_relative: unsupported platform"));
+    return "";
+#endif
+}
+
+static std::string resolve_exe_relative(const std::string& path) {
+    if (path.empty()) return path;
+
+    bool starts_with_slash = (path[0] == '/' || path[0] == '\\');
+    bool has_drive = (path.size() >= 2 && path[1] == ':');
+
+    if (!starts_with_slash && !has_drive) {
+        fs::path exe_dir = get_exe_dir();
+        return (exe_dir / path).string();
+    }
+    
+    return path;
+}
+
 // ══════════════════════════════════════════════════════════════════
 //  Extern C Interface
 // ══════════════════════════════════════════════════════════════════
@@ -73,7 +123,8 @@ extern "C" {
 
 TantrumsValue rt_filesystem_read(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.read", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
 
     if (!fs::exists(path) || !fs::is_regular_file(path)) {
         std::string err = "filesystem.read: File not found or is a directory: " + raw_path;
@@ -97,7 +148,8 @@ TantrumsValue rt_filesystem_read(TantrumsValue path_tv) {
 
 TantrumsValue rt_filesystem_write(TantrumsValue path_tv, TantrumsValue data_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.write", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::string data = get_string_arg(data_tv, "filesystem.write", "data");
 
     std::ofstream file(path, std::ios::out | std::ios::binary);
@@ -111,7 +163,8 @@ TantrumsValue rt_filesystem_write(TantrumsValue path_tv, TantrumsValue data_tv) 
 
 TantrumsValue rt_filesystem_append(TantrumsValue path_tv, TantrumsValue data_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.append", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::string data = get_string_arg(data_tv, "filesystem.append", "data");
 
     std::ofstream file(path, std::ios::app | std::ios::binary);
@@ -124,14 +177,17 @@ TantrumsValue rt_filesystem_append(TantrumsValue path_tv, TantrumsValue data_tv)
 }
 
 TantrumsValue rt_filesystem_exists(TantrumsValue path_tv) {
-    std::string path = resolve_path(get_string_arg(path_tv, "filesystem.exists", "path"));
+    std::string raw_path = get_string_arg(path_tv, "filesystem.exists", "path");
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::error_code ec;
     return tv_bool(fs::exists(path, ec));
 }
 
 TantrumsValue rt_filesystem_delete(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.delete", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::error_code ec;
     if (!fs::exists(path, ec)) {
         return tv_bool(true); // Already gone
@@ -152,7 +208,8 @@ TantrumsValue rt_filesystem_delete(TantrumsValue path_tv) {
 
 TantrumsValue rt_filesystem_mkdir(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.mkdir", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::error_code ec;
     if (!fs::create_directories(path, ec) && ec.value() != 0) {
         std::string err = "filesystem.mkdir: Failed to create directories: " + raw_path;
@@ -163,7 +220,8 @@ TantrumsValue rt_filesystem_mkdir(TantrumsValue path_tv) {
 
 TantrumsValue rt_filesystem_mkfile(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.mkfile", "path");
-    fs::path path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    fs::path path = resolve_exe_relative(resolved);
     std::error_code ec;
 
     if (path.has_parent_path()) {
@@ -180,7 +238,8 @@ TantrumsValue rt_filesystem_mkfile(TantrumsValue path_tv) {
 
 TantrumsValue rt_filesystem_listdir(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.listdir", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
 
     std::error_code ec;
     if (!fs::exists(path, ec) || !fs::is_directory(path, ec)) {
@@ -202,13 +261,17 @@ TantrumsValue rt_filesystem_listdir(TantrumsValue path_tv) {
 }
 
 TantrumsValue rt_filesystem_isfile(TantrumsValue path_tv) {
-    std::string path = resolve_path(get_string_arg(path_tv, "filesystem.isfile", "path"));
+    std::string raw_path = get_string_arg(path_tv, "filesystem.isfile", "path");
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::error_code ec;
     return tv_bool(fs::is_regular_file(path, ec));
 }
 
 TantrumsValue rt_filesystem_isdir(TantrumsValue path_tv) {
-    std::string path = resolve_path(get_string_arg(path_tv, "filesystem.isdir", "path"));
+    std::string raw_path = get_string_arg(path_tv, "filesystem.isdir", "path");
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::error_code ec;
     return tv_bool(fs::is_directory(path, ec));
 }
@@ -216,8 +279,10 @@ TantrumsValue rt_filesystem_isdir(TantrumsValue path_tv) {
 TantrumsValue rt_filesystem_copy(TantrumsValue src_tv, TantrumsValue dst_tv) {
     std::string raw_src = get_string_arg(src_tv, "filesystem.copy", "src");
     std::string raw_dst = get_string_arg(dst_tv, "filesystem.copy", "dst");
-    std::string src = resolve_path(raw_src);
-    fs::path dst = resolve_path(raw_dst);
+    std::string src_resolved = resolve_path(raw_src);
+    std::string dst_resolved = resolve_path(raw_dst);
+    std::string src = resolve_exe_relative(src_resolved);
+    fs::path dst = resolve_exe_relative(dst_resolved);
     std::error_code ec;
 
     if (dst.has_parent_path()) {
@@ -236,8 +301,10 @@ TantrumsValue rt_filesystem_copy(TantrumsValue src_tv, TantrumsValue dst_tv) {
 TantrumsValue rt_filesystem_move(TantrumsValue src_tv, TantrumsValue dst_tv) {
     std::string raw_src = get_string_arg(src_tv, "filesystem.move", "src");
     std::string raw_dst = get_string_arg(dst_tv, "filesystem.move", "dst");
-    std::string src = resolve_path(raw_src);
-    fs::path dst = resolve_path(raw_dst);
+    std::string src_resolved = resolve_path(raw_src);
+    std::string dst_resolved = resolve_path(raw_dst);
+    std::string src = resolve_exe_relative(src_resolved);
+    fs::path dst = resolve_exe_relative(dst_resolved);
     std::error_code ec;
 
     if (dst.has_parent_path()) {
@@ -254,7 +321,8 @@ TantrumsValue rt_filesystem_move(TantrumsValue src_tv, TantrumsValue dst_tv) {
 
 TantrumsValue rt_filesystem_size(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.size", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::error_code ec;
     uintmax_t size = fs::file_size(path, ec);
     if (ec) {
@@ -266,7 +334,8 @@ TantrumsValue rt_filesystem_size(TantrumsValue path_tv) {
 
 TantrumsValue rt_filesystem_readlines(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.readlines", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
 
     if (!fs::exists(path) || !fs::is_regular_file(path)) {
         std::string err = "filesystem.readlines: File not found or is a directory: " + raw_path;
@@ -290,7 +359,8 @@ TantrumsValue rt_filesystem_readlines(TantrumsValue path_tv) {
 
 TantrumsValue rt_filesystem_writelines(TantrumsValue path_tv, TantrumsValue lines_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.writelines", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     
     Value lines_val = tv_to_value_fs(lines_tv);
     if (!IS_LIST(lines_val)) {
@@ -328,7 +398,8 @@ TantrumsValue rt_filesystem_cwd() {
 
 TantrumsValue rt_filesystem_abspath(TantrumsValue path_tv) {
     std::string raw_path = get_string_arg(path_tv, "filesystem.abspath", "path");
-    std::string path = resolve_path(raw_path);
+    std::string resolved = resolve_path(raw_path);
+    std::string path = resolve_exe_relative(resolved);
     std::error_code ec;
     std::string abs_path = fs::absolute(path, ec).string();
     if (ec) {
