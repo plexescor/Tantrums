@@ -8,7 +8,8 @@
 
 bool llvm_codegen_compile(ASTNode* program, CompileMode mode,
                           const char* source_path,
-                          const std::string& outputObj);
+                          const std::string& outputObj,
+                          bool autofree, bool allow_leaks);
 
 bool llvm_codegen_link(const std::string& objPath,
                        const std::string& exePath);

@@ -91,7 +91,7 @@ void            rt_index_set(TantrumsValue obj, TantrumsValue idx, TantrumsValue
 void            rt_append(TantrumsValue list, TantrumsValue val);
 
 /* ── Memory / Pointers ──────────────────────────────── */
-TantrumsValue   rt_alloc(TantrumsValue init, const char* type_name);
+TantrumsValue   rt_alloc(TantrumsValue init, const char* type_name, int32_t line);
 void            rt_free_val(TantrumsValue ptr);
 TantrumsValue   rt_ptr_deref(TantrumsValue ptr);
 void            rt_ptr_set(TantrumsValue ptr, TantrumsValue val);
@@ -137,7 +137,7 @@ void            rt_mark_escaped(TantrumsValue v);
 void            rt_free_collection(TantrumsValue v);
 
 /* ── Lifecycle ──────────────────────────────────────── */
-void            rt_init(void);
+void            rt_init(int32_t autofree, int32_t allow_leaks);
 void            rt_shutdown(void);
 
 /* ── Time API ───────────────────────────────────────── */

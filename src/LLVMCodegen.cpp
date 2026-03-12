@@ -10,6 +10,7 @@
 #include "LLVMCodegen.h"
 #include "runtime.h"
 #include "token.h"
+#include "compiler.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
@@ -52,6 +53,15 @@ struct FuncSigInfo {
     int param_count;
 };
 
+struct LocalInfo {
+    std::string name;
+    llvm::AllocaInst* alloca;
+    const char* type_name;
+    bool holds_alloc;
+    bool auto_free;
+    bool auto_free_collection;
+};
+
 struct Codegen {
     llvm::LLVMContext                   ctx;
     std::unique_ptr<llvm::Module>       mod;
@@ -78,6 +88,12 @@ struct Codegen {
 
     std::vector<LoopInfo> loopStack;
     CompileMode mode = MODE_BOTH;
+
+    /* Memory safety state */
+    bool autofree_enabled = true;
+    bool allow_leaks_enabled = false;
+    int scopeDepth = 0;
+    std::vector<std::vector<LocalInfo>> localInfoScopes;
 
     /* try_stack / try_depth globals for setjmp */
     llvm::GlobalVariable* tryStackGV = nullptr;
@@ -193,6 +209,166 @@ static const char* llvm_infer_expr_type(Codegen& cg, ASTNode* node) {
 }
 
 /* ══════════════════════════════════════════════════════════════════
+ *  Escape Analysis (ported from compiler.cpp)
+ *  Walks the AST to determine if a named variable escapes its scope.
+ * ══════════════════════════════════════════════════════════════════ */
+
+typedef struct {
+    bool escaped;
+    bool has_manual_free;
+    int  use_count;
+    bool only_simple_assign;
+} LLVMEscapeResult;
+
+static void llvm_analyze_escape(ASTNode* node, const char* target_name, int loop_depth, LLVMEscapeResult* result) {
+    if (!node || result->escaped) return;
+
+    switch (node->type) {
+    case NODE_IDENTIFIER: {
+        if (strcmp(node->as.identifier.name, target_name) == 0) {
+            result->use_count++;
+            if (loop_depth > 0) result->escaped = true;
+            else result->escaped = true;
+        }
+        break;
+    }
+    case NODE_RETURN: {
+        LLVMEscapeResult ret_check = {false, false, 0, true};
+        llvm_analyze_escape(node->as.child, target_name, loop_depth, &ret_check);
+        if (ret_check.use_count > 0) result->escaped = true;
+        break;
+    }
+    case NODE_EXPR_STMT: {
+        if (node->as.child && node->as.child->type == NODE_INDEX_ASSIGN) {
+            ASTNode* assign = node->as.child;
+            if (assign->as.index_assign.index == nullptr &&
+                assign->as.index_assign.object->type == NODE_IDENTIFIER &&
+                strcmp(assign->as.index_assign.object->as.identifier.name, target_name) == 0) {
+                result->use_count++;
+                if (loop_depth > 0) result->escaped = true;
+                llvm_analyze_escape(assign->as.index_assign.value, target_name, loop_depth, result);
+                return;
+            }
+        }
+        llvm_analyze_escape(node->as.child, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_CALL: {
+        for (int i = 0; i < node->as.call.arg_count; i++) {
+            LLVMEscapeResult arg_check = {false, false, 0, true};
+            llvm_analyze_escape(node->as.call.args[i], target_name, loop_depth, &arg_check);
+            if (arg_check.use_count > 0) result->escaped = true;
+        }
+        llvm_analyze_escape(node->as.call.callee, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_ASSIGN:
+    case NODE_VAR_DECL: {
+        ASTNode* rhs = (node->type == NODE_ASSIGN) ? node->as.assign.value : node->as.var_decl.init;
+        LLVMEscapeResult rhs_check = {false, false, 0, true};
+        llvm_analyze_escape(rhs, target_name, loop_depth, &rhs_check);
+        if (rhs_check.use_count > 0) result->escaped = true;
+        break;
+    }
+    case NODE_INDEX_ASSIGN: {
+        LLVMEscapeResult val_check = {false, false, 0, true};
+        llvm_analyze_escape(node->as.index_assign.value, target_name, loop_depth, &val_check);
+        if (val_check.use_count > 0) result->escaped = true;
+        llvm_analyze_escape(node->as.index_assign.object, target_name, loop_depth, result);
+        if (node->as.index_assign.index) llvm_analyze_escape(node->as.index_assign.index, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_FREE: {
+        if (node->as.child && node->as.child->type == NODE_IDENTIFIER) {
+            if (strcmp(node->as.child->as.identifier.name, target_name) == 0) {
+                if (loop_depth > 0) result->escaped = true;
+                else {
+                    result->use_count++;
+                    result->has_manual_free = true;
+                }
+                return;
+            }
+        }
+        llvm_analyze_escape(node->as.child, target_name, loop_depth, result);
+        break;
+    }
+    case NODE_BLOCK: {
+        for (int i = 0; i < node->as.block.count; i++)
+            llvm_analyze_escape(node->as.block.nodes[i], target_name, loop_depth, result);
+        break;
+    }
+    case NODE_IF: {
+        llvm_analyze_escape(node->as.if_stmt.cond, target_name, loop_depth, result);
+        llvm_analyze_escape(node->as.if_stmt.then_b, target_name, loop_depth + 1, result);
+        if (node->as.if_stmt.else_b) llvm_analyze_escape(node->as.if_stmt.else_b, target_name, loop_depth + 1, result);
+        break;
+    }
+    case NODE_WHILE: {
+        llvm_analyze_escape(node->as.while_stmt.cond, target_name, loop_depth, result);
+        llvm_analyze_escape(node->as.while_stmt.body, target_name, loop_depth + 1, result);
+        break;
+    }
+    case NODE_FOR_IN: {
+        llvm_analyze_escape(node->as.for_in.iterable, target_name, loop_depth, result);
+        llvm_analyze_escape(node->as.for_in.body, target_name, loop_depth + 1, result);
+        break;
+    }
+    case NODE_BINARY:
+        llvm_analyze_escape(node->as.binary.left, target_name, loop_depth, result);
+        llvm_analyze_escape(node->as.binary.right, target_name, loop_depth, result);
+        break;
+    case NODE_UNARY:
+        if (node->as.unary.op != TOKEN_STAR)
+            llvm_analyze_escape(node->as.unary.operand, target_name, loop_depth, result);
+        break;
+    case NODE_INDEX:
+        llvm_analyze_escape(node->as.index_access.object, target_name, loop_depth, result);
+        llvm_analyze_escape(node->as.index_access.index, target_name, loop_depth, result);
+        break;
+    case NODE_POSTFIX:
+        llvm_analyze_escape(node->as.postfix.operand, target_name, loop_depth, result);
+        break;
+    case NODE_ALLOC:
+        llvm_analyze_escape(node->as.alloc_expr.init, target_name, loop_depth, result);
+        break;
+    case NODE_LIST_LIT:
+        for (int i = 0; i < node->as.list_literal.count; i++)
+            llvm_analyze_escape(node->as.list_literal.nodes[i], target_name, loop_depth, result);
+        break;
+    case NODE_MAP_LIT:
+        for (int i = 0; i < node->as.map_literal.count; i++) {
+            llvm_analyze_escape(node->as.map_literal.keys[i], target_name, loop_depth, result);
+            llvm_analyze_escape(node->as.map_literal.values[i], target_name, loop_depth, result);
+        }
+        break;
+    case NODE_TRY_CATCH:
+        llvm_analyze_escape(node->as.try_catch.try_body, target_name, loop_depth + 1, result);
+        llvm_analyze_escape(node->as.try_catch.catch_body, target_name, loop_depth + 1, result);
+        break;
+    default:
+        break;
+    }
+
+    if (result->use_count > (result->has_manual_free ? 2 : 1)) {
+        result->escaped = true;
+    }
+}
+
+/* Emit cleanup for all auto_free / auto_free_collection locals in a single scope layer */
+static void emitScopeCleanup(Codegen& cg, std::vector<LocalInfo>& locals) {
+    for (auto& li : locals) {
+        if (li.auto_free && cg.autofree_enabled) {
+            llvm::Value* val = cg.B->CreateLoad(cg.i64Ty, li.alloca, li.name.c_str());
+            cg.callRT("rt_free_val", {val});
+        }
+        if (li.auto_free_collection && cg.autofree_enabled) {
+            llvm::Value* val = cg.B->CreateLoad(cg.i64Ty, li.alloca, li.name.c_str());
+            cg.callRT("rt_free_collection", {val});
+        }
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════════
  *  Runtime function declarations
  * ══════════════════════════════════════════════════════════════════ */
 
@@ -220,7 +396,7 @@ static void declareRuntimeFunctions(Codegen& cg) {
     decl("rt_index_get",   i64, {i64, i64});
     decl("rt_index_set",   v,   {i64, i64, i64});
     decl("rt_append",      v,   {i64, i64});
-    decl("rt_alloc",       i64, {i64, p8});
+    decl("rt_alloc",       i64, {i64, p8, i32});
     decl("rt_free_val",    v,   {i64});
     decl("rt_ptr_deref",   i64, {i64});
     decl("rt_ptr_set",     v,   {i64, i64});
@@ -254,7 +430,7 @@ static void declareRuntimeFunctions(Codegen& cg) {
     decl("rt_exit_scope",  v,   {});
     decl("rt_mark_escaped",v,   {i64});
     decl("rt_free_collection", v, {i64});
-    decl("rt_init",        v,   {});
+    decl("rt_init",        v,   {i32, i32});
     decl("rt_shutdown",    v,   {});
     decl("rt_getCurrentTime",      i64, {});
     decl("rt_toSeconds",           i64, {i64});
@@ -659,7 +835,7 @@ static llvm::Value* codegenExpr(Codegen& cg, ASTNode* node) {
         llvm::Value* init = codegenExpr(cg, node->as.alloc_expr.init);
         const char* tn = node->as.alloc_expr.type_name ? node->as.alloc_expr.type_name : "dynamic";
         llvm::Value* typeStr = cg.makeStringConstant(tn);
-        return cg.callRT("rt_alloc", {init, typeStr});
+        return cg.callRT("rt_alloc", {init, typeStr, cg.i32Val(node->line)});
     }
 
     case NODE_ASSIGN: {
@@ -765,6 +941,31 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
             llvm::AllocaInst* a = cg.createEntryAlloca(cg.curFunc, name);
             cg.B->CreateStore(init, a);
             cg.setLocal(name, a, node->as.var_decl.type_name);
+
+            /* Track LocalInfo for memory safety */
+            if (!cg.localInfoScopes.empty()) {
+                LocalInfo li;
+                li.name = name;
+                li.alloca = a;
+                li.type_name = node->as.var_decl.type_name;
+                li.holds_alloc = false;
+                li.auto_free = false;
+                li.auto_free_collection = false;
+
+                if (node->as.var_decl.init && node->as.var_decl.init->type == NODE_ALLOC) {
+                    li.holds_alloc = true;
+                } else if (node->as.var_decl.init && node->as.var_decl.init->type == NODE_CALL &&
+                           node->as.var_decl.init->as.call.callee->type == NODE_IDENTIFIER) {
+                    auto sigIt = cg.funcSigs.find(node->as.var_decl.init->as.call.callee->as.identifier.name);
+                    if (sigIt != cg.funcSigs.end() && !sigIt->second.ret_type.empty()) {
+                        const char* rt = sigIt->second.ret_type.c_str();
+                        int rtlen = (int)strlen(rt);
+                        if (rtlen > 0 && rt[rtlen - 1] == '*')
+                            li.holds_alloc = true;
+                    }
+                }
+                cg.localInfoScopes.back().push_back(li);
+            }
         } else {
             auto* gv = new llvm::GlobalVariable(*cg.mod, cg.i64Ty, false,
                                                 llvm::GlobalValue::InternalLinkage,
@@ -778,13 +979,73 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
 
     case NODE_BLOCK:
         cg.pushScope();
+        cg.localInfoScopes.emplace_back();
         cg.callRT("rt_enter_scope", {});
+        cg.scopeDepth++;
         for (int i = 0; i < node->as.block.count; i++) {
             codegenStmt(cg, node->as.block.nodes[i]);
             if (cg.B->GetInsertBlock()->getTerminator()) break;
+
+            /* After each var_decl, run escape analysis on remaining statements */
+            if (node->as.block.nodes[i]->type == NODE_VAR_DECL &&
+                !cg.localInfoScopes.empty()) {
+                ASTNode* decl = node->as.block.nodes[i];
+                const char* vname = decl->as.var_decl.name;
+
+                /* Find the LocalInfo we just pushed */
+                auto& curLocals = cg.localInfoScopes.back();
+                LocalInfo* li = nullptr;
+                for (auto& l : curLocals) {
+                    if (l.name == vname) { li = &l; break; }
+                }
+                if (!li) continue;
+
+                /* Escape analysis for alloc pointers */
+                if (li->holds_alloc) {
+                    LLVMEscapeResult er = {false, false, 0, true};
+                    for (int j = i + 1; j < node->as.block.count; j++) {
+                        llvm_analyze_escape(node->as.block.nodes[j], vname, 0, &er);
+                        if (er.escaped) break;
+                    }
+                    if (er.escaped) {
+                        li->holds_alloc = false;
+                    } else if (er.has_manual_free) {
+                        li->holds_alloc = false;
+                    } else if (er.use_count == 1) {
+                        li->auto_free = true;
+                        li->holds_alloc = false;
+                    } else {
+                        li->holds_alloc = false;
+                    }
+                }
+
+                /* Escape analysis for list/map locals */
+                if (li->type_name &&
+                    (strcmp(li->type_name, "list") == 0 || strcmp(li->type_name, "map") == 0)) {
+                    bool init_is_collection = (decl->as.var_decl.init == nullptr) ||
+                                               (decl->as.var_decl.init->type == NODE_LIST_LIT) ||
+                                               (decl->as.var_decl.init->type == NODE_MAP_LIT);
+                    if (init_is_collection && cg.autofree_enabled) {
+                        LLVMEscapeResult er = {false, false, 0, true};
+                        for (int j = i + 1; j < node->as.block.count; j++) {
+                            llvm_analyze_escape(node->as.block.nodes[j], vname, 0, &er);
+                            if (er.escaped) break;
+                        }
+                        if (!er.escaped) {
+                            li->auto_free_collection = true;
+                        }
+                    }
+                }
+            }
         }
-        if (!cg.B->GetInsertBlock()->getTerminator())
+        /* Scope exit: emit auto-frees then rt_exit_scope */
+        if (!cg.B->GetInsertBlock()->getTerminator()) {
+            if (!cg.localInfoScopes.empty())
+                emitScopeCleanup(cg, cg.localInfoScopes.back());
             cg.callRT("rt_exit_scope", {});
+        }
+        cg.scopeDepth--;
+        if (!cg.localInfoScopes.empty()) cg.localInfoScopes.pop_back();
         cg.popScope();
         break;
 
@@ -872,10 +1133,15 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
         if (it == cg.userFuncs.end()) break;
         llvm::Function* fn = it->second;
         llvm::Function* savedFunc = cg.curFunc;
+        int savedScopeDepth = cg.scopeDepth;
+        auto savedLocalInfoScopes = std::move(cg.localInfoScopes);
+        cg.scopeDepth = 0;
+        cg.localInfoScopes.clear();
         cg.curFunc = fn;
         llvm::BasicBlock* entry = llvm::BasicBlock::Create(cg.ctx, "entry", fn);
         cg.B->SetInsertPoint(entry);
         cg.pushScope();
+        cg.localInfoScopes.emplace_back();
         int pi = 0;
         for (auto& arg : fn->args()) {
             std::string pname = node->as.func_decl.params[pi].name;
@@ -885,20 +1151,29 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
             pi++;
         }
         ASTNode* body = node->as.func_decl.body;
-        if (body && body->type == NODE_BLOCK) {
-            for (int i = 0; i < body->as.block.count; i++)
-                codegenStmt(cg, body->as.block.nodes[i]);
-        } else codegenStmt(cg, body);
+        codegenStmt(cg, body);
         if (!cg.B->GetInsertBlock()->getTerminator())
             cg.B->CreateRet(cg.makeNull());
+        if (!cg.localInfoScopes.empty()) cg.localInfoScopes.pop_back();
         cg.popScope();
         cg.curFunc = savedFunc;
+        cg.scopeDepth = savedScopeDepth;
+        cg.localInfoScopes = std::move(savedLocalInfoScopes);
         break;
     }
 
     case NODE_RETURN: {
         llvm::Value* retVal = node->as.child ? codegenExpr(cg, node->as.child) : cg.makeNull();
-        cg.B->CreateRet(retVal);
+        /* Store return value in temp so we can emit cleanup before ret */
+        llvm::AllocaInst* retTemp = cg.createEntryAlloca(cg.curFunc, "$retval");
+        cg.B->CreateStore(retVal, retTemp);
+        /* Walk ALL scopes from innermost to outermost, emitting cleanup */
+        for (int si = (int)cg.localInfoScopes.size() - 1; si >= 0; si--) {
+            emitScopeCleanup(cg, cg.localInfoScopes[si]);
+            cg.callRT("rt_exit_scope", {});
+        }
+        llvm::Value* finalRet = cg.B->CreateLoad(cg.i64Ty, retTemp, "retval");
+        cg.B->CreateRet(finalRet);
         break;
     }
 
@@ -1000,8 +1275,14 @@ static void codegenStmt(Codegen& cg, ASTNode* node) {
         }
         break;
 
-    case NODE_AUTOFREE:  break;
-    case NODE_ALLOW_LEAKS: break;
+    case NODE_AUTOFREE:
+        if (node->as.autofree.enabled) cg.autofree_enabled = true;
+        else cg.autofree_enabled = false;
+        break;
+    case NODE_ALLOW_LEAKS:
+        if (node->as.allow_leaks.enabled) cg.allow_leaks_enabled = true;
+        else cg.allow_leaks_enabled = false;
+        break;
     case NODE_USE: break;
     case NODE_PROGRAM: break;
 
@@ -1048,7 +1329,7 @@ static void codegenProgram(Codegen& cg, ASTNode* program) {
     llvm::BasicBlock* mainEntry = llvm::BasicBlock::Create(cg.ctx, "entry", mainFn);
     cg.B->SetInsertPoint(mainEntry);
     cg.curFunc = mainFn;
-    cg.callRT("rt_init", {});
+    cg.callRT("rt_init", {cg.i32Val(cg.autofree_enabled ? 1 : 0), cg.i32Val(cg.allow_leaks_enabled ? 1 : 0)});
     cg.B->CreateCall(initFn);
     auto it = cg.userFuncs.find("main");
     if (it != cg.userFuncs.end()) cg.B->CreateCall(it->second);
@@ -1062,7 +1343,8 @@ static void codegenProgram(Codegen& cg, ASTNode* program) {
 
 bool llvm_codegen_compile(ASTNode* program, CompileMode mode,
                           const char* source_path,
-                          const std::string& outputObj) {
+                          const std::string& outputObj,
+                          bool autofree, bool allow_leaks) {
     /* Use native target init — InitializeAllTargets doesn't reliably
      * pull in target libraries when linking statically. */
     llvm::InitializeNativeTarget();
@@ -1071,6 +1353,8 @@ bool llvm_codegen_compile(ASTNode* program, CompileMode mode,
 
     Codegen cg;
     cg.mode = mode;
+    cg.autofree_enabled = autofree;
+    cg.allow_leaks_enabled = allow_leaks;
     cg.mod = std::make_unique<llvm::Module>("tantrums", cg.ctx);
     cg.B = std::make_unique<llvm::IRBuilder<>>(cg.ctx);
     cg.i64Ty   = llvm::Type::getInt64Ty(cg.ctx);

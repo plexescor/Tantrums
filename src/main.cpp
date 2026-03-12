@@ -407,7 +407,8 @@ int main(int argc, char* argv[]) {
         char* obj_path = make_obj_path(file_path);
         char* exe_path = make_exe_path(file_path);
 
-        bool ok = llvm_codegen_compile(ast, mode, file_path, obj_path);
+        bool ok = llvm_codegen_compile(ast, mode, file_path, obj_path,
+                                        global_autofree, global_allow_leaks);
         ast_free(ast);
         /* Source buffer can now be freed since AST is gone */
         free(source);

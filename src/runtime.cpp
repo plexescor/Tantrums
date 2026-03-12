@@ -194,7 +194,7 @@ extern "C" {
 
 /* ── Lifecycle ──────────────────────────────────────── */
 
-void rt_init(void) {
+void rt_init(int32_t autofree, int32_t allow_leaks) {
     scope_depth = 0;
     try_depth = 0;
     call_stack_depth = 0;
@@ -203,6 +203,8 @@ void rt_init(void) {
     auto_free_count = 0;
     auto_free_capacity = 0;
     total_auto_frees = 0;
+    global_autofree = (autofree != 0);
+    global_allow_leaks = (allow_leaks != 0);
 }
 
 void rt_shutdown(void) {
@@ -450,14 +452,14 @@ void rt_append(TantrumsValue list_tv, TantrumsValue val_tv) {
 
 /* ── Memory / Pointers ──────────────────────────────── */
 
-TantrumsValue rt_alloc(TantrumsValue init_tv, const char* type_name) {
+TantrumsValue rt_alloc(TantrumsValue init_tv, const char* type_name, int32_t line) {
     Value init = tv_to_value(init_tv);
     Value* target = (Value*)tantrums_realloc(nullptr, 0, sizeof(Value));
     *target = init;
 
     ObjPointer* ptr = obj_pointer_new(target);
     ptr->alloc_size = sizeof(ObjPointer) + sizeof(Value);
-    ptr->alloc_line = 0;
+    ptr->alloc_line = line;
     ptr->scope_depth = scope_depth;
     ptr->auto_manage = global_autofree;
     if (type_name) {
