@@ -186,6 +186,8 @@ bool global_autofree = true;
 bool global_allow_leaks = false;
 const char* current_bytecode_path = nullptr;
 
+static char exe_dir[4096] = {0};
+
 /* ══════════════════════════════════════════════════════════════════
  *  Runtime function implementations
  * ══════════════════════════════════════════════════════════════════ */
@@ -193,6 +195,45 @@ const char* current_bytecode_path = nullptr;
 extern "C" {
 
 /* ── Lifecycle ──────────────────────────────────────── */
+
+void rt_set_exe_path(const char* argv0) {
+#if defined(_WIN32)
+    /* On Windows, use GetModuleFileNameA for the real path regardless of
+     * how the process was launched (PATH lookup, relative path, etc.) */
+    char full_path[4096];
+    DWORD len = GetModuleFileNameA(NULL, full_path, sizeof(full_path));
+    if (len > 0) {
+        char* last_sep = nullptr;
+        for (DWORD i = 0; i < len; i++)
+            if (full_path[i] == '\\' || full_path[i] == '/')
+                last_sep = full_path + i;
+        if (last_sep) {
+            size_t dir_len = (size_t)(last_sep - full_path);
+            if (dir_len < sizeof(exe_dir) - 1) {
+                memcpy(exe_dir, full_path, dir_len);
+                exe_dir[dir_len] = '\0';
+                return;
+            }
+        }
+    }
+#endif
+    /* Fallback: strip filename from argv0 */
+    if (!argv0) return;
+    const char* last_sep = nullptr;
+    for (const char* p = argv0; *p; p++)
+        if (*p == '/' || *p == '\\') last_sep = p;
+    if (last_sep) {
+        size_t dir_len = (size_t)(last_sep - argv0);
+        if (dir_len < sizeof(exe_dir) - 1) {
+            memcpy(exe_dir, argv0, dir_len);
+            exe_dir[dir_len] = '\0';
+        }
+    } else {
+        /* argv0 has no directory component — use current directory */
+        exe_dir[0] = '.';
+        exe_dir[1] = '\0';
+    }
+}
 
 void rt_init(int32_t autofree, int32_t allow_leaks) {
     scope_depth = 0;
@@ -208,9 +249,10 @@ void rt_init(int32_t autofree, int32_t allow_leaks) {
 }
 
 void rt_shutdown(void) {
-    /* Auto-free report */
+    /* ── Auto-free report ───────────────────────────── */
     if (total_auto_frees > 0) {
         if (total_auto_frees <= 20) {
+            /* Print to terminal */
             printf("\nTANTRUMS AUTO-FREE REPORT\n");
             printf("============================\n");
             printf("Auto-Frees: %d allocations\n", total_auto_frees);
@@ -232,10 +274,44 @@ void rt_shutdown(void) {
             printf("  Total auto-freed: %zu bytes\n", total_bytes);
             printf("                  = %.2f KB\n", total_bytes / 1024.0);
             printf("============================\n");
+        } else {
+            /* > 20 auto-frees: write autoFree.txt next to exe */
+            char af_path[4096 + 32];
+            snprintf(af_path, sizeof(af_path), "%s%sautoFree.txt",
+                     exe_dir[0] ? exe_dir : ".",
+                     exe_dir[0] ? "/" : "/");
+            FILE* af = fopen(af_path, "w");
+            size_t total_bytes = 0;
+            if (af) {
+                fprintf(af, "TANTRUMS AUTO-FREE REPORT\n");
+                fprintf(af, "============================\n");
+                fprintf(af, "Auto-Frees: %d allocations\n", total_auto_frees);
+                fprintf(af, "============================\n");
+                for (int i = 0; i < auto_free_count; i++) {
+                    fprintf(af, "  alloc at line %d in %s -- %s (%zu bytes)",
+                            auto_free_records[i].line,
+                            auto_free_records[i].func_name ? auto_free_records[i].func_name : "<script>",
+                            auto_free_records[i].type_name ? auto_free_records[i].type_name : "dynamic",
+                            auto_free_records[i].size);
+                    if (auto_free_records[i].count > 1)
+                        fprintf(af, " [x%d]", auto_free_records[i].count);
+                    fprintf(af, "\n");
+                    total_bytes += auto_free_records[i].size * auto_free_records[i].count;
+                }
+                fprintf(af, "============================\n");
+                fprintf(af, "SUMMARY\n");
+                fprintf(af, "  Total auto-freed: %zu bytes\n", total_bytes);
+                fprintf(af, "                  = %.2f KB\n", total_bytes / 1024.0);
+                fprintf(af, "============================\n");
+                fclose(af);
+                printf("[Tantrums] Auto-free report written to: %s\n", af_path);
+            } else {
+                fprintf(stderr, "[Tantrums] Could not write autoFree.txt\n");
+            }
         }
     }
 
-    /* Leak detection — scan all_objects for un-freed allocations */
+    /* ── Leak detection ─────────────────────────────── */
     int leak_count = 0;
     size_t leak_bytes = 0;
     for (Obj* obj = all_objects; obj != nullptr; obj = obj->next) {
@@ -250,6 +326,7 @@ void rt_shutdown(void) {
 
     if (leak_count > 0) {
         if (leak_count <= 5) {
+            /* Print to stderr */
             fprintf(stderr, "\n[Tantrums Warning] Memory leak detected: %d allocation(s) not freed.\n", leak_count);
             for (Obj* obj = all_objects; obj != nullptr; obj = obj->next) {
                 if (obj->type == OBJ_POINTER) {
@@ -264,8 +341,37 @@ void rt_shutdown(void) {
                 }
             }
         } else {
-            fprintf(stderr, "\n[Tantrums Warning] Memory leak detected: %d allocation(s) not freed.\n", leak_count);
-            fprintf(stderr, "See memleaklog.txt in the same directory as the executing bytecode.\n");
+            /* > 5 leaks: write memoryLeakLog.txt next to exe */
+            char ml_path[4096 + 32];
+            snprintf(ml_path, sizeof(ml_path), "%s%smemoryLeakLog.txt",
+                     exe_dir[0] ? exe_dir : ".",
+                     exe_dir[0] ? "/" : "/");
+            FILE* mlf = fopen(ml_path, "w");
+            if (mlf) {
+                fprintf(mlf, "TANTRUMS MEMORY LEAK REPORT\n");
+                fprintf(mlf, "============================\n");
+                fprintf(mlf, "Leaks: %d allocation(s) not freed (%zu bytes total)\n",
+                        leak_count, leak_bytes);
+                fprintf(mlf, "============================\n");
+                for (Obj* obj = all_objects; obj != nullptr; obj = obj->next) {
+                    if (obj->type == OBJ_POINTER) {
+                        ObjPointer* p = (ObjPointer*)obj;
+                        if (p->is_valid) {
+                            fprintf(mlf, "  alloc at line %d in %s -- %s (%zu bytes)\n",
+                                    p->alloc_line,
+                                    p->alloc_func ? p->alloc_func->chars : "<script>",
+                                    p->alloc_type ? p->alloc_type->chars : "dynamic",
+                                    p->alloc_size);
+                        }
+                    }
+                }
+                fclose(mlf);
+                fprintf(stderr, "\n[Tantrums Warning] %d memory leak(s) detected -- see %s\n",
+                        leak_count, ml_path);
+            } else {
+                fprintf(stderr, "\n[Tantrums Warning] Memory leak detected: %d allocation(s) not freed.\n", leak_count);
+                fprintf(stderr, "[Tantrums] Could not write memoryLeakLog.txt\n");
+            }
         }
     }
 

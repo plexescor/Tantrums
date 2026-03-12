@@ -17,10 +17,10 @@
 #include <cstdlib>
 #include <cstring>
 
-const char* current_bytecode_path = nullptr;
+extern const char* current_bytecode_path;
 bool suppress_autofree_notes = false;
-bool global_autofree = true;
-bool global_allow_leaks = false;
+extern bool global_autofree;
+extern bool global_allow_leaks;
 
 /* ── File reading ──────────────────────────────────── */
 

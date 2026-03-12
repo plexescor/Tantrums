@@ -28,6 +28,9 @@
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Host.h>
+#include <llvm/Bitcode/BitcodeReader.h>
+#include <llvm/Linker/Linker.h>
+#include "tantrums_runtime_bc.h"
 
 /* On Windows we invoke lld-link.exe as an external process
  * to avoid pulling in LLVMWindowsManifest/libxml2 dependencies. */
@@ -430,6 +433,7 @@ static void declareRuntimeFunctions(Codegen& cg) {
     decl("rt_exit_scope",  v,   {});
     decl("rt_mark_escaped",v,   {i64});
     decl("rt_free_collection", v, {i64});
+    decl("rt_set_exe_path", v,   {p8});
     decl("rt_init",        v,   {i32, i32});
     decl("rt_shutdown",    v,   {});
     decl("rt_getCurrentTime",      i64, {});
@@ -1322,13 +1326,24 @@ static void codegenProgram(Codegen& cg, ASTNode* program) {
         if (n->type == NODE_FUNC_DECL) codegenStmt(cg, n);
     }
 
-    /* C main() */
-    llvm::FunctionType* mainFT = llvm::FunctionType::get(llvm::Type::getInt32Ty(cg.ctx), false);
+    /* C main() — takes (int argc, char** argv) so we can get the exe path */
+    llvm::Type* i32Ty = llvm::Type::getInt32Ty(cg.ctx);
+    llvm::Type* i8ptrptrTy = llvm::PointerType::getUnqual(cg.ctx);
+    std::vector<llvm::Type*> mainParams = {i32Ty, i8ptrptrTy};
+    llvm::FunctionType* mainFT = llvm::FunctionType::get(i32Ty, mainParams, false);
     llvm::Function* mainFn = llvm::Function::Create(mainFT, llvm::Function::ExternalLinkage,
                                                     "main", cg.mod.get());
+    mainFn->getArg(0)->setName("argc");
+    mainFn->getArg(1)->setName("argv");
     llvm::BasicBlock* mainEntry = llvm::BasicBlock::Create(cg.ctx, "entry", mainFn);
     cg.B->SetInsertPoint(mainEntry);
     cg.curFunc = mainFn;
+    /* Extract argv[0] and pass it to rt_set_exe_path so the runtime knows
+     * which directory to write autoFree.txt / memoryLeakLog.txt into */
+    llvm::Value* argv = mainFn->getArg(1);
+    llvm::Value* argv0ptr = cg.B->CreateGEP(cg.i8PtrTy, argv, {cg.i32Val(0)}, "argv0ptr");
+    llvm::Value* argv0 = cg.B->CreateLoad(cg.i8PtrTy, argv0ptr, "argv0");
+    cg.callRT("rt_set_exe_path", {argv0});
     cg.callRT("rt_init", {cg.i32Val(cg.autofree_enabled ? 1 : 0), cg.i32Val(cg.allow_leaks_enabled ? 1 : 0)});
     cg.B->CreateCall(initFn);
     auto it = cg.userFuncs.find("main");
@@ -1365,6 +1380,30 @@ bool llvm_codegen_compile(ASTNode* program, CompileMode mode,
     declareRuntimeFunctions(cg);
     prescan(cg, program);
     codegenProgram(cg, program);
+
+    /* ══ Link embedded runtime bitcode into user module (Option A LTO) ══
+     * This must happen AFTER codegen (so all runtime call sites exist in
+     * cg.mod as declared stubs) and BEFORE the optimizer (so the optimizer
+     * sees both user IR and runtime definitions simultaneously). */
+    {
+        auto bufRef = llvm::MemoryBufferRef(
+            llvm::StringRef(reinterpret_cast<const char*>(tantrums_runtime_bc),
+                            tantrums_runtime_bc_size),
+            "tantrums_runtime");
+        auto rtModOrErr = llvm::parseBitcodeFile(bufRef, cg.ctx);
+        if (!rtModOrErr) {
+            fprintf(stderr, "[Tantrums] Failed to parse embedded runtime bitcode.\n");
+            return false;
+        }
+        std::unique_ptr<llvm::Module> rtMod = std::move(rtModOrErr.get());
+        /* LinkOnlyNeeded: only pull in runtime functions actually referenced
+         * by user code. Dead runtime helpers are not included — smaller binary. */
+        if (llvm::Linker::linkModules(*cg.mod, std::move(rtMod),
+                                      llvm::Linker::LinkOnlyNeeded)) {
+            fprintf(stderr, "[Tantrums] Failed to link embedded runtime into user module.\n");
+            return false;
+        }
+    }
 
     std::string verifyErr;
     llvm::raw_string_ostream verifyOS(verifyErr);
@@ -1422,16 +1461,18 @@ bool llvm_codegen_compile(ASTNode* program, CompileMode mode,
 
 bool llvm_codegen_link(const std::string& objPath,
                        const std::string& exePath) {
-    std::string runtimeLib = TANTRUMS_RUNTIME_OBJ;
-    /* Use clang++ as linker driver — it automatically includes CRT startup
-     * objects (mainCRTStartup) and links the correct CRT libraries.
-     * Bare lld-link doesn't do this, causing pre-main crashes. */
+    /* Runtime is now baked into objPath via LTO — no external runtime lib needed.
+     * clang++ handles CRT startup objects and system libs automatically.
+     * TANTRUMS_TARGET_TRIPLE is set by CMake from `clang++ -dumpmachine`
+     * so it correctly reflects the host triple on Windows, Linux, and macOS. */
+    auto q = [](const std::string& s) -> std::string {
+        return "\"" + s + "\"";
+    };
     std::string cmd = "clang++";
-    cmd += " --target=x86_64-pc-windows-msvc";
+    cmd += " --target=" TANTRUMS_TARGET_TRIPLE;
     cmd += " -fuse-ld=lld";
-    cmd += " \"" + objPath + "\"";
-    cmd += " \"" + runtimeLib + "\"";
-    cmd += " -o \"" + exePath + "\"";
+    cmd += " " + q(objPath);
+    cmd += " -o " + q(exePath);
     int rc = system(cmd.c_str());
     if (rc != 0) {
         fprintf(stderr, "[Tantrums] Linking failed (exit %d).\n", rc);

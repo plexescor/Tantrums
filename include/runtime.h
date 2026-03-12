@@ -137,6 +137,7 @@ void            rt_mark_escaped(TantrumsValue v);
 void            rt_free_collection(TantrumsValue v);
 
 /* ── Lifecycle ──────────────────────────────────────── */
+void            rt_set_exe_path(const char* argv0);
 void            rt_init(int32_t autofree, int32_t allow_leaks);
 void            rt_shutdown(void);
 
